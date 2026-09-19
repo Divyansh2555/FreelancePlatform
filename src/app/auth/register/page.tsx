@@ -7,65 +7,150 @@ import { apiFetch } from "../../../lib/api";
 type UserRole = "client" | "freelancer" | "admin";
 
 type RegisterResponse = {
-  id?: number;
+  id?: number | string;
   name?: string;
   email?: string;
-  role?: UserRole;
+  role?: UserRole | string;
   detail?: string;
   message?: string;
 };
+
+function normalizeRole(
+  value: unknown
+): UserRole | null {
+  if (
+    value !== "client" &&
+    value !== "freelancer" &&
+    value !== "admin"
+  ) {
+    return null;
+  }
+
+  return value;
+}
 
 export default function Register() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const [role, setRole] = useState<UserRole>("client");
+  const [role, setRole] =
+    useState<UserRole>("client");
 
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [loading, setLoading] =
+    useState(false);
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+  const [error, setError] =
+    useState("");
+
+  async function handleSubmit(
+    e: FormEvent<HTMLFormElement>
+  ) {
     e.preventDefault();
+
+    if (loading) {
+      return;
+    }
 
     setLoading(true);
     setError("");
 
     try {
-      const data: RegisterResponse = await apiFetch(
-        "/auth/register",
-        {
-          method: "POST",
-          body: JSON.stringify({
-            name: name.trim(),
-            email: email.trim(),
-            password,
-            role,
-          }),
-        }
-      );
+      const payload = {
+        name: name.trim(),
+        email: email.trim(),
+        password,
+        role,
+      };
 
-      console.log("Register response:", data);
-
-      if (!data.id) {
+      if (!payload.name) {
         throw new Error(
-          "Registration response is invalid."
+          "Please enter your name."
         );
       }
 
-      const userRole = data.role || role;
+      if (!payload.email) {
+        throw new Error(
+          "Please enter your email."
+        );
+      }
 
+      if (!payload.password) {
+        throw new Error(
+          "Please enter your password."
+        );
+      }
+
+      if (payload.password.length < 6) {
+        throw new Error(
+          "Password must be at least 6 characters."
+        );
+      }
+
+      /**
+       * IMPORTANT:
+       * apiFetch ko generic RegisterResponse diya gaya hai.
+       * Isse `data` unknown nahi rahega.
+       */
+      const data =
+        await apiFetch<RegisterResponse>(
+          "/auth/register",
+          {
+            method: "POST",
+            body: JSON.stringify(payload),
+          }
+        );
+
+      console.log(
+        "Register response:",
+        data
+      );
+
+      /**
+       * Backend error response
+       */
+      if (!data) {
+        throw new Error(
+          "Registration response was empty."
+        );
+      }
+
+      /**
+       * User ID
+       */
       if (
-        userRole !== "client" &&
-        userRole !== "freelancer" &&
-        userRole !== "admin"
+        data.id === undefined ||
+        data.id === null
       ) {
+        throw new Error(
+          data.detail ||
+            data.message ||
+            "Registration response is invalid."
+        );
+      }
+
+      /**
+       * Role
+       *
+       * Backend agar role return karega
+       * to backend role use hoga.
+       *
+       * Agar backend role return nahi karta,
+       * to selected role use hoga.
+       */
+      const userRole =
+        normalizeRole(data.role) ||
+        role;
+
+      if (!userRole) {
         throw new Error(
           "Invalid registration role."
         );
       }
 
-      // Save user information
+      /**
+       * Save user information
+       */
       localStorage.setItem(
         "user_id",
         String(data.id)
@@ -78,24 +163,68 @@ export default function Register() {
 
       localStorage.setItem(
         "email",
-        data.email || email.trim()
+        data.email ||
+          payload.email
       );
 
-      // Role based redirect
+      /**
+       * Save complete user object
+       */
+      localStorage.setItem(
+        "user",
+        JSON.stringify({
+          id: data.id,
+          name:
+            data.name ||
+            payload.name,
+          email:
+            data.email ||
+            payload.email,
+          role: userRole,
+        })
+      );
+
+      console.log(
+        "REGISTERED USER:",
+        {
+          id: data.id,
+          name:
+            data.name ||
+            payload.name,
+          email:
+            data.email ||
+            payload.email,
+          role: userRole,
+        }
+      );
+
+      /**
+       * Role based redirect
+       */
       if (userRole === "client") {
-        window.location.replace("/client");
+        window.location.replace(
+          "/client"
+        );
         return;
       }
 
       if (userRole === "freelancer") {
-        window.location.replace("/freelancer");
+        window.location.replace(
+          "/freelancer"
+        );
         return;
       }
 
       if (userRole === "admin") {
-        window.location.replace("/admin");
+        window.location.replace(
+          "/admin"
+        );
         return;
       }
+
+      throw new Error(
+        `Unsupported user role: ${userRole}`
+      );
     } catch (err) {
       console.error(
         "Registration error:",
@@ -105,7 +234,7 @@ export default function Register() {
       setError(
         err instanceof Error
           ? err.message
-          : "Something went wrong"
+          : "Something went wrong."
       );
     } finally {
       setLoading(false);
@@ -164,7 +293,8 @@ export default function Register() {
                 placeholder="Your name"
                 autoComplete="name"
                 required
-                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-gray-900 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                disabled={loading}
+                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-gray-900 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
               />
             </div>
 
@@ -187,7 +317,8 @@ export default function Register() {
                 placeholder="you@example.com"
                 autoComplete="email"
                 required
-                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-gray-900 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                disabled={loading}
+                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-gray-900 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
               />
             </div>
 
@@ -205,13 +336,16 @@ export default function Register() {
                 type="password"
                 value={password}
                 onChange={(e) =>
-                  setPassword(e.target.value)
+                  setPassword(
+                    e.target.value
+                  )
                 }
                 placeholder="Enter your password"
                 autoComplete="new-password"
                 minLength={6}
                 required
-                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-gray-900 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                disabled={loading}
+                className="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-3.5 text-gray-900 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
               />
             </div>
 
@@ -229,11 +363,13 @@ export default function Register() {
                 value={role}
                 onChange={(e) =>
                   setRole(
-                    e.target.value as UserRole
+                    e.target
+                      .value as UserRole
                   )
                 }
                 required
-                className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3.5 text-gray-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                disabled={loading}
+                className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3.5 text-gray-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <option value="client">
                   Client

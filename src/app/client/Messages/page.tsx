@@ -1,21 +1,177 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type KeyboardEvent,
+} from "react";
 
 const API_URL = "http://127.0.0.1:8000";
 const WS_URL = "ws://127.0.0.1:8000";
+
+// =========================================================
+// TYPES
+// =========================================================
+
+interface User {
+  id: number | string;
+  name: string;
+  role?: string | null;
+  email?: string | null;
+  avatar?: string | null;
+}
+
+interface Conversation {
+  id: number | string;
+  [key: string]: unknown;
+}
+
+interface Message {
+  id: number | string | null;
+  conversation_id: number | string | null;
+  sender_id: number | string | null;
+  receiver_id: number | string | null;
+  message: string;
+  is_read: boolean;
+  created_at: string;
+}
+
+interface WebSocketMessage {
+  type?: string;
+  message_id?: number | string | null;
+  id?: number | string | null;
+  conversation_id?: number | string | null;
+  conversationId?: number | string | null;
+  sender_id?: number | string | null;
+  senderId?: number | string | null;
+  receiver_id?: number | string | null;
+  receiverId?: number | string | null;
+  message?: string;
+  content?: string;
+  is_read?: boolean;
+  created_at?: string;
+  createdAt?: string;
+  detail?: string;
+}
+
+interface ApiError {
+  detail?: string;
+  message?: string;
+}
+
+interface JwtPayload {
+  sub?: string | number;
+  [key: string]: unknown;
+}
+
+// =========================================================
+// HELPERS
+// =========================================================
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === "string") {
+    return error;
+  }
+
+  return "Something went wrong";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isUser(value: unknown): value is User {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    (typeof value.id === "number" ||
+      typeof value.id === "string") &&
+    typeof value.name === "string"
+  );
+}
+
+function normalizeMessage(value: unknown): Message | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const id =
+    typeof value.id === "number" || typeof value.id === "string"
+      ? value.id
+      : null;
+
+  const conversationId =
+    typeof value.conversation_id === "number" ||
+    typeof value.conversation_id === "string"
+      ? value.conversation_id
+      : null;
+
+  const senderId =
+    typeof value.sender_id === "number" ||
+    typeof value.sender_id === "string"
+      ? value.sender_id
+      : null;
+
+  const receiverId =
+    typeof value.receiver_id === "number" ||
+    typeof value.receiver_id === "string"
+      ? value.receiver_id
+      : null;
+
+  const message =
+    typeof value.message === "string"
+      ? value.message
+      : typeof value.content === "string"
+        ? value.content
+        : "";
+
+  const createdAt =
+    typeof value.created_at === "string"
+      ? value.created_at
+      : typeof value.createdAt === "string"
+        ? value.createdAt
+        : new Date().toISOString();
+
+  const isRead =
+    typeof value.is_read === "boolean" ? value.is_read : false;
+
+  return {
+    id,
+    conversation_id: conversationId,
+    sender_id: senderId,
+    receiver_id: receiverId,
+    message,
+    is_read: isRead,
+    created_at: createdAt,
+  };
+}
+
+// =========================================================
+// COMPONENT
+// =========================================================
 
 export default function MessagesPage() {
   // =========================================================
   // STATE
   // =========================================================
 
-  const [users, setUsers] = useState([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [search, setSearch] = useState("");
 
-  const [selectedUser, setSelectedUser] = useState(null);
-  const [conversation, setConversation] = useState(null);
-  const [messages, setMessages] = useState([]);
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [conversation, setConversation] =
+    useState<Conversation | null>(null);
+
+  const [messages, setMessages] = useState<Message[]>([]);
 
   const [message, setMessage] = useState("");
   const [connected, setConnected] = useState(false);
@@ -27,21 +183,23 @@ export default function MessagesPage() {
   // REFS
   // =========================================================
 
-  const socketRef = useRef(null);
-  const reconnectTimerRef = useRef(null);
-  const messagesEndRef = useRef(null);
+  const socketRef = useRef<WebSocket | null>(null);
 
-  // WebSocket ko latest conversation ID mile
-  const conversationRef = useRef(null);
+  const reconnectTimerRef = useRef<
+    ReturnType<typeof setTimeout> | null
+  >(null);
 
-  // Component mounted hai ya nahi
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  const conversationRef = useRef<Conversation | null>(null);
+
   const mountedRef = useRef(false);
 
   // =========================================================
   // TOKEN
   // =========================================================
 
-  const getToken = useCallback(() => {
+  const getToken = useCallback((): string | null => {
     if (typeof window === "undefined") {
       return null;
     }
@@ -53,10 +211,10 @@ export default function MessagesPage() {
   // CURRENT USER ID
   // =========================================================
 
-  const getCurrentUserId = useCallback(() => {
+  const getCurrentUserId = useCallback((): number | null => {
     const token = getToken();
 
-    if (!token) {
+    if (!token || typeof window === "undefined") {
       return null;
     }
 
@@ -77,23 +235,17 @@ export default function MessagesPage() {
 
       const payload = JSON.parse(
         window.atob(paddedBase64)
-      );
+      ) as JwtPayload;
 
-      if (!payload?.sub) {
+      if (payload?.sub === undefined || payload?.sub === null) {
         return null;
       }
 
       const userId = Number(payload.sub);
 
-      return Number.isFinite(userId)
-        ? userId
-        : null;
-    } catch (error) {
-      console.error(
-        "JWT decode error:",
-        error
-      );
-
+      return Number.isFinite(userId) ? userId : null;
+    } catch (error: unknown) {
+      console.error("JWT decode error:", error);
       return null;
     }
   }, [getToken]);
@@ -105,7 +257,7 @@ export default function MessagesPage() {
   // =========================================================
 
   const searchUsers = useCallback(
-    async (value = "") => {
+    async (value = ""): Promise<void> => {
       const token = getToken();
 
       if (!token) {
@@ -117,9 +269,7 @@ export default function MessagesPage() {
         setUsersLoading(true);
 
         const response = await fetch(
-          `${API_URL}/chat/users?search=${encodeURIComponent(
-            value
-          )}`,
+          `${API_URL}/chat/users?search=${encodeURIComponent(value)}`,
           {
             method: "GET",
             headers: {
@@ -129,27 +279,29 @@ export default function MessagesPage() {
           }
         );
 
-        const data =
-          await response.json().catch(() => null);
+        const data: unknown = await response
+          .json()
+          .catch(() => null);
 
         if (!response.ok) {
+          const errorData = isRecord(data)
+            ? (data as ApiError)
+            : null;
+
           throw new Error(
-            data?.detail ||
+            errorData?.detail ||
+              errorData?.message ||
               "Users load nahi hue"
           );
         }
 
-        setUsers(
-          Array.isArray(data)
-            ? data
-            : []
-        );
-      } catch (error) {
-        console.error(
-          "Users error:",
-          error
-        );
-
+        if (Array.isArray(data)) {
+          setUsers(data.filter(isUser));
+        } else {
+          setUsers([]);
+        }
+      } catch (error: unknown) {
+        console.error("Users error:", error);
         setUsers([]);
       } finally {
         setUsersLoading(false);
@@ -163,7 +315,7 @@ export default function MessagesPage() {
   // =========================================================
 
   useEffect(() => {
-    searchUsers("");
+    void searchUsers("");
   }, [searchUsers]);
 
   // =========================================================
@@ -172,7 +324,7 @@ export default function MessagesPage() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      searchUsers(search);
+      void searchUsers(search);
     }, 350);
 
     return () => {
@@ -189,7 +341,7 @@ export default function MessagesPage() {
 
     let reconnectAttempts = 0;
 
-    const connect = () => {
+    const connect = (): void => {
       if (!mountedRef.current) {
         return;
       }
@@ -197,35 +349,25 @@ export default function MessagesPage() {
       const token = getToken();
 
       if (!token) {
-        console.error(
-          "JWT token nahi mila"
-        );
-
+        console.error("JWT token nahi mila");
         setConnected(false);
         return;
       }
 
-      // Already connected / connecting
+      const existingSocket = socketRef.current;
+
       if (
-        socketRef.current &&
-        (
-          socketRef.current.readyState ===
-            WebSocket.OPEN ||
-          socketRef.current.readyState ===
-            WebSocket.CONNECTING
-        )
+        existingSocket &&
+        (existingSocket.readyState === WebSocket.OPEN ||
+          existingSocket.readyState === WebSocket.CONNECTING)
       ) {
         return;
       }
 
-      console.log(
-        "Connecting WebSocket..."
-      );
+      console.log("Connecting WebSocket...");
 
       const ws = new WebSocket(
-        `${WS_URL}/chat/ws/${encodeURIComponent(
-          token
-        )}`
+        `${WS_URL}/chat/ws/${encodeURIComponent(token)}`
       );
 
       socketRef.current = ws;
@@ -234,17 +376,14 @@ export default function MessagesPage() {
       // OPEN
       // =====================================================
 
-      ws.onopen = () => {
+      ws.onopen = (): void => {
         if (!mountedRef.current) {
           return;
         }
 
-        console.log(
-          "WebSocket connected"
-        );
+        console.log("WebSocket connected");
 
         reconnectAttempts = 0;
-
         setConnected(true);
       };
 
@@ -252,31 +391,23 @@ export default function MessagesPage() {
       // MESSAGE
       // =====================================================
 
-      ws.onmessage = (event) => {
+      ws.onmessage = (event: MessageEvent<string>): void => {
         if (!mountedRef.current) {
           return;
         }
 
         try {
-          const data = JSON.parse(
-            event.data
-          );
+          const data: WebSocketMessage = JSON.parse(event.data);
 
-          console.log(
-            "WS RECEIVED:",
-            data
-          );
+          console.log("WS RECEIVED:", data);
 
           // =================================================
           // NEW MESSAGE
           // =================================================
 
           if (data.type === "message") {
-            const newMessage = {
-              id:
-                data.message_id ??
-                data.id ??
-                null,
+            const newMessage: Message = {
+              id: data.message_id ?? data.id ?? null,
 
               conversation_id:
                 data.conversation_id ??
@@ -298,9 +429,7 @@ export default function MessagesPage() {
                 data.content ??
                 "",
 
-              is_read:
-                data.is_read ??
-                false,
+              is_read: data.is_read ?? false,
 
               created_at:
                 data.created_at ??
@@ -308,22 +437,14 @@ export default function MessagesPage() {
                 new Date().toISOString(),
             };
 
-            // ---------------------------------------------
-            // CURRENT CONVERSATION
-            // ---------------------------------------------
-
             const activeConversation =
               conversationRef.current;
 
             if (
               activeConversation?.id &&
               newMessage.conversation_id &&
-              Number(
-                newMessage.conversation_id
-              ) !==
-                Number(
-                  activeConversation.id
-                )
+              Number(newMessage.conversation_id) !==
+                Number(activeConversation.id)
             ) {
               console.log(
                 "Different conversation - ignored"
@@ -332,56 +453,35 @@ export default function MessagesPage() {
               return;
             }
 
-            // ---------------------------------------------
-            // ADD MESSAGE
-            // ---------------------------------------------
+            setMessages((previousMessages) => {
+              const alreadyExists =
+                previousMessages.some((oldMessage) => {
+                  if (
+                    newMessage.id != null &&
+                    oldMessage.id != null
+                  ) {
+                    return (
+                      Number(oldMessage.id) ===
+                      Number(newMessage.id)
+                    );
+                  }
 
-            setMessages(
-              (previousMessages) => {
-                const alreadyExists =
-                  previousMessages.some(
-                    (oldMessage) => {
-                      // Message ID check
-                      if (
-                        newMessage.id != null &&
-                        oldMessage.id != null
-                      ) {
-                        return (
-                          Number(
-                            oldMessage.id
-                          ) ===
-                          Number(
-                            newMessage.id
-                          )
-                        );
-                      }
-
-                      // Fallback check
-                      return (
-                        oldMessage.message ===
-                          newMessage.message &&
-                        Number(
-                          oldMessage.sender_id
-                        ) ===
-                          Number(
-                            newMessage.sender_id
-                          ) &&
-                        oldMessage.created_at ===
-                          newMessage.created_at
-                      );
-                    }
+                  return (
+                    oldMessage.message ===
+                      newMessage.message &&
+                    Number(oldMessage.sender_id) ===
+                      Number(newMessage.sender_id) &&
+                    oldMessage.created_at ===
+                      newMessage.created_at
                   );
+                });
 
-                if (alreadyExists) {
-                  return previousMessages;
-                }
-
-                return [
-                  ...previousMessages,
-                  newMessage,
-                ];
+              if (alreadyExists) {
+                return previousMessages;
               }
-            );
+
+              return [...previousMessages, newMessage];
+            });
           }
 
           // =================================================
@@ -389,8 +489,7 @@ export default function MessagesPage() {
           // =================================================
 
           if (
-            data.type ===
-              "message_read" ||
+            data.type === "message_read" ||
             data.type === "read"
           ) {
             const messageId =
@@ -399,18 +498,15 @@ export default function MessagesPage() {
               null;
 
             if (messageId != null) {
-              setMessages(
-                (previousMessages) =>
-                  previousMessages.map(
-                    (item) =>
-                      Number(item.id) ===
-                      Number(messageId)
-                        ? {
-                            ...item,
-                            is_read: true,
-                          }
-                        : item
-                  )
+              setMessages((previousMessages) =>
+                previousMessages.map((item) =>
+                  Number(item.id) === Number(messageId)
+                    ? {
+                        ...item,
+                        is_read: true,
+                      }
+                    : item
+                )
               );
             }
           }
@@ -425,7 +521,7 @@ export default function MessagesPage() {
               data.message
             );
           }
-        } catch (error) {
+        } catch (error: unknown) {
           console.error(
             "WebSocket JSON error:",
             error
@@ -437,11 +533,8 @@ export default function MessagesPage() {
       // ERROR
       // =====================================================
 
-      ws.onerror = (error) => {
-        console.error(
-          "WebSocket error:",
-          error
-        );
+      ws.onerror = (error: Event): void => {
+        console.error("WebSocket error:", error);
 
         if (mountedRef.current) {
           setConnected(false);
@@ -452,7 +545,7 @@ export default function MessagesPage() {
       // CLOSE
       // =====================================================
 
-      ws.onclose = (event) => {
+      ws.onclose = (event: CloseEvent): void => {
         console.log(
           "WebSocket closed:",
           event.code,
@@ -468,8 +561,7 @@ export default function MessagesPage() {
         reconnectAttempts += 1;
 
         const delay = Math.min(
-          1000 *
-            2 ** (reconnectAttempts - 1),
+          1000 * 2 ** (reconnectAttempts - 1),
           10000
         );
 
@@ -477,9 +569,11 @@ export default function MessagesPage() {
           `Reconnecting in ${delay}ms...`
         );
 
-        clearTimeout(
-          reconnectTimerRef.current
-        );
+        if (reconnectTimerRef.current) {
+          clearTimeout(
+            reconnectTimerRef.current
+          );
+        }
 
         reconnectTimerRef.current =
           setTimeout(() => {
@@ -499,14 +593,15 @@ export default function MessagesPage() {
     return () => {
       mountedRef.current = false;
 
-      clearTimeout(
-        reconnectTimerRef.current
-      );
+      if (reconnectTimerRef.current) {
+        clearTimeout(
+          reconnectTimerRef.current
+        );
 
-      reconnectTimerRef.current = null;
+        reconnectTimerRef.current = null;
+      }
 
-      const socket =
-        socketRef.current;
+      const socket = socketRef.current;
 
       if (socket) {
         socket.onopen = null;
@@ -515,10 +610,8 @@ export default function MessagesPage() {
         socket.onclose = null;
 
         if (
-          socket.readyState ===
-            WebSocket.OPEN ||
-          socket.readyState ===
-            WebSocket.CONNECTING
+          socket.readyState === WebSocket.OPEN ||
+          socket.readyState === WebSocket.CONNECTING
         ) {
           socket.close();
         }
@@ -534,7 +627,7 @@ export default function MessagesPage() {
   // OPEN CHAT
   // =========================================================
 
-  const openChat = async (user) => {
+  const openChat = async (user: User): Promise<void> => {
     if (!user?.id) {
       return;
     }
@@ -542,21 +635,17 @@ export default function MessagesPage() {
     const token = getToken();
 
     if (!token) {
-      alert(
-        "JWT token nahi mila"
-      );
+      alert("JWT token nahi mila");
       return;
     }
 
     try {
       setLoading(true);
 
-      // Old chat clear
       setSelectedUser(user);
       setMessages([]);
       setConversation(null);
 
-      // Important
       conversationRef.current = null;
 
       // =====================================================
@@ -569,138 +658,135 @@ export default function MessagesPage() {
           method: "POST",
 
           headers: {
-            "Content-Type":
-              "application/json",
-
-            Authorization:
-              `Bearer ${token}`,
-
-            Accept:
-              "application/json",
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+            Accept: "application/json",
           },
 
           body: JSON.stringify({
-            user_id: Number(
-              user.id
-            ),
+            user_id: Number(user.id),
           }),
         }
       );
 
-      const conversationData =
-        await response
-          .json()
-          .catch(() => null);
+      const conversationData: unknown =
+        await response.json().catch(() => null);
 
       if (!response.ok) {
+        const errorData = isRecord(conversationData)
+          ? (conversationData as ApiError)
+          : null;
+
         throw new Error(
-          conversationData?.detail ||
+          errorData?.detail ||
+            errorData?.message ||
             "Conversation create nahi hui"
         );
       }
 
-      if (!conversationData?.id) {
+      if (
+        !isRecord(conversationData) ||
+        conversationData.id === undefined ||
+        conversationData.id === null
+      ) {
         throw new Error(
           "Backend ne conversation ID nahi bheji"
         );
       }
 
-      // State + Ref
-      setConversation(
-        conversationData
-      );
+      const normalizedConversation: Conversation = {
+        id: conversationData.id as number | string,
+        ...conversationData,
+      };
+
+      setConversation(normalizedConversation);
 
       conversationRef.current =
-        conversationData;
+        normalizedConversation;
 
       // =====================================================
       // LOAD OLD MESSAGES
       // =====================================================
 
-      const messageResponse =
-        await fetch(
-          `${API_URL}/chat/${conversationData.id}/messages`,
-          {
-            method: "GET",
+      const messageResponse = await fetch(
+        `${API_URL}/chat/${normalizedConversation.id}/messages`,
+        {
+          method: "GET",
 
-            headers: {
-              Authorization:
-                `Bearer ${token}`,
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/json",
+          },
+        }
+      );
 
-              Accept:
-                "application/json",
-            },
-          }
-        );
-
-      const oldMessages =
+      const oldMessagesData: unknown =
         await messageResponse
           .json()
           .catch(() => null);
 
       if (!messageResponse.ok) {
+        const errorData = isRecord(oldMessagesData)
+          ? (oldMessagesData as ApiError)
+          : null;
+
         throw new Error(
-          oldMessages?.detail ||
+          errorData?.detail ||
+            errorData?.message ||
             "Messages load nahi hue"
         );
       }
 
-      const normalizedMessages =
-        Array.isArray(
-          oldMessages
-        )
-          ? oldMessages
+      const normalizedMessages: Message[] =
+        Array.isArray(oldMessagesData)
+          ? oldMessagesData
+              .map(normalizeMessage)
+              .filter(
+                (item): item is Message =>
+                  item !== null
+              )
           : [];
 
       // =====================================================
       // MERGE OLD + WS MESSAGE
       // =====================================================
 
-      setMessages(
-        (currentMessages) => {
-          const merged = [
-            ...normalizedMessages,
-            ...currentMessages,
-          ];
+      setMessages((currentMessages) => {
+        const merged = [
+          ...normalizedMessages,
+          ...currentMessages,
+        ];
 
-          const unique = [];
-          const ids = new Set();
+        const unique: Message[] = [];
+        const ids = new Set<string>();
 
-          for (const item of merged) {
-            if (
-              item?.id != null
-            ) {
-              const id =
-                String(item.id);
+        for (const item of merged) {
+          if (item?.id != null) {
+            const id = String(item.id);
 
-              if (ids.has(id)) {
-                continue;
-              }
-
-              ids.add(id);
+            if (ids.has(id)) {
+              continue;
             }
 
-            unique.push(item);
+            ids.add(id);
           }
 
-          return unique;
+          unique.push(item);
         }
-      );
-    } catch (error) {
-      console.error(
-        "Open chat error:",
-        error
-      );
 
-      conversationRef.current =
-        null;
+        return unique;
+      });
+    } catch (error: unknown) {
+      console.error("Open chat error:", error);
+
+      conversationRef.current = null;
 
       setSelectedUser(null);
       setConversation(null);
       setMessages([]);
 
       alert(
-        error?.message ||
+        getErrorMessage(error) ||
           "Chat open nahi hui"
       );
     } finally {
@@ -712,76 +798,50 @@ export default function MessagesPage() {
   // SEND MESSAGE
   // =========================================================
 
-  const sendMessage = () => {
-    const text =
-      message.trim();
+  const sendMessage = (): void => {
+    const text = message.trim();
 
     if (!text) {
       return;
     }
 
     if (!selectedUser) {
-      alert(
-        "Pehle user select karo"
-      );
+      alert("Pehle user select karo");
       return;
     }
 
     if (!conversation?.id) {
-      alert(
-        "Conversation open nahi hai"
-      );
+      alert("Conversation open nahi hai");
       return;
     }
 
-    const socket =
-      socketRef.current;
+    const socket = socketRef.current;
 
     if (!socket) {
-      alert(
-        "WebSocket available nahi hai"
-      );
+      alert("WebSocket available nahi hai");
       return;
     }
 
-    if (
-      socket.readyState !==
-      WebSocket.OPEN
-    ) {
-      alert(
-        "Chat server connected nahi hai"
-      );
+    if (socket.readyState !== WebSocket.OPEN) {
+      alert("Chat server connected nahi hai");
       return;
     }
 
     try {
       const payload = {
-        receiver_id: Number(
-          selectedUser.id
-        ),
+        receiver_id: Number(selectedUser.id),
         message: text,
       };
 
-      console.log(
-        "WS SEND:",
-        payload
-      );
+      console.log("WS SEND:", payload);
 
-      socket.send(
-        JSON.stringify(payload)
-      );
+      socket.send(JSON.stringify(payload));
 
-      // Server response ke baad message add hoga
       setMessage("");
-    } catch (error) {
-      console.error(
-        "Send message error:",
-        error
-      );
+    } catch (error: unknown) {
+      console.error("Send message error:", error);
 
-      alert(
-        "Message send nahi hua"
-      );
+      alert("Message send nahi hua");
     }
   };
 
@@ -789,13 +849,14 @@ export default function MessagesPage() {
   // KEYBOARD
   // =========================================================
 
-  const handleKeyDown = (event) => {
+  const handleKeyDown = (
+    event: KeyboardEvent<HTMLTextAreaElement>
+  ): void => {
     if (
       event.key === "Enter" &&
       !event.shiftKey
     ) {
       event.preventDefault();
-
       sendMessage();
     }
   };
@@ -805,19 +866,17 @@ export default function MessagesPage() {
   // =========================================================
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView(
-      {
-        behavior: "smooth",
-        block: "end",
-      }
-    );
+    messagesEndRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "end",
+    });
   }, [messages]);
 
   // =========================================================
   // CLOSE CHAT
   // =========================================================
 
-  const closeChat = () => {
+  const closeChat = (): void => {
     setSelectedUser(null);
     setConversation(null);
     setMessages([]);
@@ -830,45 +889,34 @@ export default function MessagesPage() {
   // TIME
   // =========================================================
 
-  const formatTime = (date) => {
+  const formatTime = (
+    date: string | null | undefined
+  ): string => {
     if (!date) {
       return "";
     }
 
-    const parsed =
-      new Date(date);
+    const parsed = new Date(date);
 
-    if (
-      Number.isNaN(
-        parsed.getTime()
-      )
-    ) {
+    if (Number.isNaN(parsed.getTime())) {
       return "";
     }
 
-    return parsed.toLocaleTimeString(
-      [],
-      {
-        hour: "2-digit",
-        minute: "2-digit",
-      }
-    );
+    return parsed.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   };
 
   // =========================================================
   // INITIAL
   // =========================================================
 
-  const getInitial = (
-    name = ""
-  ) => {
-    const value =
-      String(name).trim();
+  const getInitial = (name = ""): string => {
+    const value = String(name).trim();
 
     return value
-      ? value
-          .charAt(0)
-          .toUpperCase()
+      ? value.charAt(0).toUpperCase()
       : "?";
   };
 
@@ -899,13 +947,10 @@ export default function MessagesPage() {
             }
           `}
         >
-
           {/* HEADER */}
 
           <div className="border-b border-gray-100 bg-white px-5 pb-4 pt-5">
-
             <div className="flex items-center justify-between">
-
               <div>
                 <h1 className="text-[22px] font-bold tracking-tight text-gray-900">
                   Messages
@@ -931,7 +976,6 @@ export default function MessagesPage() {
                   }
                 `}
               >
-
                 <span
                   className={`
                     h-2 w-2 rounded-full
@@ -943,16 +987,13 @@ export default function MessagesPage() {
                   `}
                 />
 
-                {connected
-                  ? "Online"
-                  : "Offline"}
+                {connected ? "Online" : "Offline"}
               </div>
             </div>
 
             {/* SEARCH */}
 
             <div className="relative mt-5">
-
               <svg
                 className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
                 fill="none"
@@ -970,11 +1011,9 @@ export default function MessagesPage() {
               <input
                 type="text"
                 value={search}
-                onChange={(event) =>
-                  setSearch(
-                    event.target.value
-                  )
-                }
+                onChange={(
+                  event: ChangeEvent<HTMLInputElement>
+                ) => setSearch(event.target.value)}
                 placeholder="Search people..."
                 className="
                   h-11 w-full
@@ -992,48 +1031,46 @@ export default function MessagesPage() {
                   focus:ring-emerald-50
                 "
               />
-
             </div>
           </div>
 
           {/* USER LIST */}
 
           <div className="flex-1 overflow-y-auto">
-
             {usersLoading ? (
-
               <div className="flex h-full items-center justify-center">
-
-                <div className="
-                  h-7 w-7
-                  animate-spin
-                  rounded-full
-                  border-2
-                  border-gray-200
-                  border-t-emerald-500
-                " />
-
+                <div
+                  className="
+                    h-7 w-7
+                    animate-spin
+                    rounded-full
+                    border-2
+                    border-gray-200
+                    border-t-emerald-500
+                  "
+                />
               </div>
-
             ) : users.length === 0 ? (
-
-              <div className="
-                flex h-full
-                flex-col
-                items-center
-                justify-center
-                px-8
-                text-center
-              ">
-
-                <div className="
-                  flex h-16 w-16
+              <div
+                className="
+                  flex h-full
+                  flex-col
                   items-center
                   justify-center
-                  rounded-2xl
-                  bg-gray-100
-                  text-2xl
-                ">
+                  px-8
+                  text-center
+                "
+              >
+                <div
+                  className="
+                    flex h-16 w-16
+                    items-center
+                    justify-center
+                    rounded-2xl
+                    bg-gray-100
+                    text-2xl
+                  "
+                >
                   👥
                 </div>
 
@@ -1044,26 +1081,18 @@ export default function MessagesPage() {
                 <p className="mt-1 text-xs text-gray-400">
                   Try searching with another name
                 </p>
-
               </div>
-
             ) : (
-
-              users.map((user) => {
-
+              users.map((user: User) => {
                 const active =
-                  Number(
-                    selectedUser?.id
-                  ) ===
+                  Number(selectedUser?.id) ===
                   Number(user.id);
 
                 return (
                   <button
                     key={user.id}
                     type="button"
-                    onClick={() =>
-                      openChat(user)
-                    }
+                    onClick={() => void openChat(user)}
                     disabled={loading}
                     className={`
                       group flex w-full
@@ -1080,11 +1109,9 @@ export default function MessagesPage() {
                       }
                     `}
                   >
-
                     {/* AVATAR */}
 
                     <div className="relative shrink-0">
-
                       <div
                         className={`
                           flex h-12 w-12
@@ -1099,26 +1126,24 @@ export default function MessagesPage() {
                           }
                         `}
                       >
-                        {getInitial(
-                          user.name
-                        )}
+                        {getInitial(user.name)}
                       </div>
 
-                      <span className="
-                        absolute
-                        bottom-0 right-0
-                        h-3 w-3
-                        rounded-full
-                        border-2 border-white
-                        bg-emerald-500
-                      " />
-
+                      <span
+                        className="
+                          absolute
+                          bottom-0 right-0
+                          h-3 w-3
+                          rounded-full
+                          border-2 border-white
+                          bg-emerald-500
+                        "
+                      />
                     </div>
 
                     {/* USER INFO */}
 
                     <div className="min-w-0 flex-1">
-
                       <h2
                         className={`
                           truncate
@@ -1134,16 +1159,16 @@ export default function MessagesPage() {
                         {user.name}
                       </h2>
 
-                      <p className="
-                        mt-1
-                        truncate
-                        text-xs
-                        text-gray-400
-                      ">
-                        {user.role ||
-                          "Available to chat"}
+                      <p
+                        className="
+                          mt-1
+                          truncate
+                          text-xs
+                          text-gray-400
+                        "
+                      >
+                        {user.role || "Available to chat"}
                       </p>
-
                     </div>
 
                     {/* ARROW */}
@@ -1168,12 +1193,10 @@ export default function MessagesPage() {
                         d="m9 18 6-6-6-6"
                       />
                     </svg>
-
                   </button>
                 );
               })
             )}
-
           </div>
         </aside>
 
@@ -1191,129 +1214,131 @@ export default function MessagesPage() {
             }
           `}
         >
-
           {/* =================================================
               EMPTY STATE
           ================================================== */}
 
           {!selectedUser ? (
+            <div
+              className="
+                relative
+                flex flex-1
+                items-center
+                justify-center
+                overflow-hidden
+                bg-[#f8fafb]
+              "
+            >
+              <div
+                className="
+                  absolute
+                  -left-24
+                  -top-24
+                  h-72 w-72
+                  rounded-full
+                  bg-emerald-100/40
+                  blur-3xl
+                "
+              />
 
-            <div className="
-              relative
-              flex flex-1
-              items-center
-              justify-center
-              overflow-hidden
-              bg-[#f8fafb]
-            ">
+              <div
+                className="
+                  absolute
+                  -bottom-24
+                  -right-24
+                  h-72 w-72
+                  rounded-full
+                  bg-indigo-100/40
+                  blur-3xl
+                "
+              />
 
-              <div className="
-                absolute
-                -left-24
-                -top-24
-                h-72 w-72
-                rounded-full
-                bg-emerald-100/40
-                blur-3xl
-              " />
-
-              <div className="
-                absolute
-                -bottom-24
-                -right-24
-                h-72 w-72
-                rounded-full
-                bg-indigo-100/40
-                blur-3xl
-              " />
-
-              <div className="
-                relative z-10
-                px-6
-                text-center
-              ">
-
-                <div className="
-                  mx-auto
-                  flex h-24 w-24
-                  items-center
-                  justify-center
-                  rounded-[28px]
-                  bg-gradient-to-br
-                  from-emerald-400
-                  to-emerald-600
-                  text-4xl
-                  text-white
-                  shadow-xl
-                  shadow-emerald-200
-                ">
+              <div className="relative z-10 px-6 text-center">
+                <div
+                  className="
+                    mx-auto
+                    flex h-24 w-24
+                    items-center
+                    justify-center
+                    rounded-[28px]
+                    bg-gradient-to-br
+                    from-emerald-400
+                    to-emerald-600
+                    text-4xl
+                    text-white
+                    shadow-xl
+                    shadow-emerald-200
+                  "
+                >
                   💬
                 </div>
 
-                <h2 className="
-                  mt-7
-                  text-3xl
-                  font-bold
-                  tracking-tight
-                  text-gray-800
-                ">
+                <h2
+                  className="
+                    mt-7
+                    text-3xl
+                    font-bold
+                    tracking-tight
+                    text-gray-800
+                  "
+                >
                   Your messages
                 </h2>
 
-                <p className="
-                  mx-auto
-                  mt-2
-                  max-w-sm
-                  text-sm
-                  leading-6
-                  text-gray-400
-                ">
+                <p
+                  className="
+                    mx-auto
+                    mt-2
+                    max-w-sm
+                    text-sm
+                    leading-6
+                    text-gray-400
+                  "
+                >
                   Select someone from the sidebar
                   to start a private conversation.
                 </p>
 
-                <div className="
-                  mx-auto mt-6
-                  inline-flex
-                  items-center gap-2
-                  rounded-full
-                  bg-white
-                  px-4 py-2
-                  text-xs font-medium
-                  text-gray-500
-                  shadow-sm
-                  ring-1 ring-gray-100
-                ">
-
+                <div
+                  className="
+                    mx-auto mt-6
+                    inline-flex
+                    items-center gap-2
+                    rounded-full
+                    bg-white
+                    px-4 py-2
+                    text-xs font-medium
+                    text-gray-500
+                    shadow-sm
+                    ring-1 ring-gray-100
+                  "
+                >
                   <span className="text-emerald-500">
                     ●
                   </span>
 
                   Real-time messaging enabled
-
                 </div>
-
               </div>
             </div>
-
           ) : (
-
             <>
               {/* =================================================
                   CHAT HEADER
               ================================================== */}
 
-              <header className="
-                flex h-[70px]
-                shrink-0
-                items-center gap-3
-                border-b border-gray-200
-                bg-white
-                px-3
-                shadow-sm
-                sm:px-5
-              ">
-
+              <header
+                className="
+                  flex h-[70px]
+                  shrink-0
+                  items-center gap-3
+                  border-b border-gray-200
+                  bg-white
+                  px-3
+                  shadow-sm
+                  sm:px-5
+                "
+              >
                 {/* BACK */}
 
                 <button
@@ -1332,7 +1357,6 @@ export default function MessagesPage() {
                   "
                   aria-label="Back"
                 >
-
                   <svg
                     className="h-5 w-5"
                     fill="none"
@@ -1346,48 +1370,49 @@ export default function MessagesPage() {
                       d="M15 19 8 12l7-7"
                     />
                   </svg>
-
                 </button>
 
                 {/* AVATAR */}
 
-                <div className="
-                  flex h-11 w-11
-                  shrink-0
-                  items-center
-                  justify-center
-                  rounded-full
-                  bg-gradient-to-br
-                  from-indigo-100
-                  to-purple-100
-                  font-bold
-                  text-indigo-600
-                ">
-                  {getInitial(
-                    selectedUser.name
-                  )}
+                <div
+                  className="
+                    flex h-11 w-11
+                    shrink-0
+                    items-center
+                    justify-center
+                    rounded-full
+                    bg-gradient-to-br
+                    from-indigo-100
+                    to-purple-100
+                    font-bold
+                    text-indigo-600
+                  "
+                >
+                  {getInitial(selectedUser.name)}
                 </div>
 
                 {/* USER INFO */}
 
                 <div className="min-w-0 flex-1">
-
-                  <h2 className="
-                    truncate
-                    text-[15px]
-                    font-semibold
-                    text-gray-900
-                  ">
+                  <h2
+                    className="
+                      truncate
+                      text-[15px]
+                      font-semibold
+                      text-gray-900
+                    "
+                  >
                     {selectedUser.name}
                   </h2>
 
-                  <div className="
-                    mt-0.5
-                    flex
-                    items-center
-                    gap-1.5
-                  ">
-
+                  <div
+                    className="
+                      mt-0.5
+                      flex
+                      items-center
+                      gap-1.5
+                    "
+                  >
                     <span
                       className={`
                         h-1.5 w-1.5
@@ -1400,15 +1425,11 @@ export default function MessagesPage() {
                       `}
                     />
 
-                    <p className="
-                      text-xs
-                      text-gray-400
-                    ">
+                    <p className="text-xs text-gray-400">
                       {connected
                         ? "Online"
                         : "Connecting..."}
                     </p>
-
                   </div>
                 </div>
 
@@ -1427,31 +1448,16 @@ export default function MessagesPage() {
                   "
                   aria-label="More"
                 >
-
                   <svg
                     className="h-5 w-5"
                     fill="currentColor"
                     viewBox="0 0 24 24"
                   >
-                    <circle
-                      cx="5"
-                      cy="12"
-                      r="1.5"
-                    />
-                    <circle
-                      cx="12"
-                      cy="12"
-                      r="1.5"
-                    />
-                    <circle
-                      cx="19"
-                      cy="12"
-                      r="1.5"
-                    />
+                    <circle cx="5" cy="12" r="1.5" />
+                    <circle cx="12" cy="12" r="1.5" />
+                    <circle cx="19" cy="12" r="1.5" />
                   </svg>
-
                 </button>
-
               </header>
 
               {/* =================================================
@@ -1468,105 +1474,87 @@ export default function MessagesPage() {
                   sm:py-6
                 "
                 style={{
-                  backgroundColor:
-                    "#f5f7f6",
-
+                  backgroundColor: "#f5f7f6",
                   backgroundImage:
                     "radial-gradient(rgba(0,0,0,.035) 1px, transparent 1px)",
-
-                  backgroundSize:
-                    "20px 20px",
+                  backgroundSize: "20px 20px",
                 }}
               >
-
-                <div className="
-                  mx-auto
-                  flex
-                  max-w-4xl
-                  flex-col
-                  gap-2
-                ">
-
+                <div
+                  className="
+                    mx-auto
+                    flex
+                    max-w-4xl
+                    flex-col
+                    gap-2
+                  "
+                >
                   {/* SECURITY */}
 
-                  <div className="
-                    mb-4
-                    flex
-                    justify-center
-                  ">
-
-                    <div className="
-                      inline-flex
-                      items-center
-                      gap-2
-                      rounded-full
-                      bg-amber-50
-                      px-3.5 py-2
-                      text-[11px]
-                      font-medium
-                      text-amber-700
-                      shadow-sm
-                      ring-1
-                      ring-amber-100
-                    ">
+                  <div className="mb-4 flex justify-center">
+                    <div
+                      className="
+                        inline-flex
+                        items-center
+                        gap-2
+                        rounded-full
+                        bg-amber-50
+                        px-3.5 py-2
+                        text-[11px]
+                        font-medium
+                        text-amber-700
+                        shadow-sm
+                        ring-1
+                        ring-amber-100
+                      "
+                    >
                       🔒 Messages are private and secure
                     </div>
-
                   </div>
 
                   {/* EMPTY CHAT */}
 
                   {messages.length === 0 && (
-                    <div className="
-                      my-16
-                      text-center
-                    ">
-
-                      <div className="
-                        mx-auto
-                        flex h-14 w-14
-                        items-center
-                        justify-center
-                        rounded-2xl
-                        bg-white
-                        text-xl
-                        shadow-sm
-                      ">
+                    <div className="my-16 text-center">
+                      <div
+                        className="
+                          mx-auto
+                          flex h-14 w-14
+                          items-center
+                          justify-center
+                          rounded-2xl
+                          bg-white
+                          text-xl
+                          shadow-sm
+                        "
+                      >
                         👋
                       </div>
 
-                      <p className="
-                        mt-3
-                        text-sm
-                        font-medium
-                        text-gray-500
-                      ">
-                        Say hello to{" "}
-                        {selectedUser.name}
+                      <p
+                        className="
+                          mt-3
+                          text-sm
+                          font-medium
+                          text-gray-500
+                        "
+                      >
+                        Say hello to {selectedUser.name}
                       </p>
 
-                      <p className="
-                        mt-1
-                        text-xs
-                        text-gray-400
-                      ">
+                      <p className="mt-1 text-xs text-gray-400">
                         Start your conversation below
                       </p>
-
                     </div>
                   )}
 
                   {/* MESSAGE LIST */}
 
                   {messages.map(
-                    (item, index) => {
+                    (item: Message, index: number) => {
                       const isMine =
-                        Number(
-                          item.sender_id
-                        ) ===
-                        Number(
-                          currentUserId
-                        );
+                        Number(item.sender_id) ===
+                        Number(currentUserId);
 
                       return (
                         <div
@@ -1583,7 +1571,6 @@ export default function MessagesPage() {
                             }
                           `}
                         >
-
                           <div
                             className={`
                               relative
@@ -1599,31 +1586,35 @@ export default function MessagesPage() {
                               }
                             `}
                           >
-
-                            <p className="
-                              whitespace-pre-wrap
-                              break-words
-                              pr-14
-                              text-[14px]
-                              leading-[1.45]
-                            ">
+                            <p
+                              className="
+                                whitespace-pre-wrap
+                                break-words
+                                pr-14
+                                text-[14px]
+                                leading-[1.45]
+                              "
+                            >
                               {item.message}
                             </p>
 
-                            <div className="
-                              absolute
-                              bottom-1.5
-                              right-2.5
-                              flex
-                              items-center
-                              gap-1
-                            ">
-
-                              <span className="
-                                text-[10px]
-                                font-medium
-                                text-gray-400
-                              ">
+                            <div
+                              className="
+                                absolute
+                                bottom-1.5
+                                right-2.5
+                                flex
+                                items-center
+                                gap-1
+                              "
+                            >
+                              <span
+                                className="
+                                  text-[10px]
+                                  font-medium
+                                  text-gray-400
+                                "
+                              >
                                 {formatTime(
                                   item.created_at
                                 )}
@@ -1646,9 +1637,7 @@ export default function MessagesPage() {
                                     : "✓"}
                                 </span>
                               )}
-
                             </div>
-
                           </div>
                         </div>
                       );
@@ -1659,7 +1648,6 @@ export default function MessagesPage() {
                     ref={messagesEndRef}
                     className="h-1"
                   />
-
                 </div>
               </section>
 
@@ -1667,35 +1655,36 @@ export default function MessagesPage() {
                   INPUT
               ================================================== */}
 
-              <footer className="
-                shrink-0
-                border-t
-                border-gray-200
-                bg-white
-                px-2.5
-                py-2.5
-                sm:px-5
-                sm:py-3
-              ">
-
-                <div className="
-                  mx-auto
-                  flex
-                  max-w-4xl
-                  items-end
-                  gap-2
-                ">
-
+              <footer
+                className="
+                  shrink-0
+                  border-t
+                  border-gray-200
+                  bg-white
+                  px-2.5
+                  py-2.5
+                  sm:px-5
+                  sm:py-3
+                "
+              >
+                <div
+                  className="
+                    mx-auto
+                    flex
+                    max-w-4xl
+                    items-end
+                    gap-2
+                  "
+                >
                   {/* EMOJI */}
 
                   <button
                     type="button"
                     onClick={() =>
-                      setMessage(
-                        (previous) =>
-                          previous
-                            ? `${previous} 😊`
-                            : "😊"
+                      setMessage((previous) =>
+                        previous
+                          ? `${previous} 😊`
+                          : "😊"
                       )
                     }
                     className="
@@ -1717,32 +1706,33 @@ export default function MessagesPage() {
 
                   {/* TEXTAREA */}
 
-                  <div className="
-                    flex
-                    flex-1
-                    items-end
-                    rounded-2xl
-                    border
-                    border-gray-200
-                    bg-gray-50
-                    px-1.5
-                    transition
-                    focus-within:border-emerald-300
-                    focus-within:bg-white
-                    focus-within:ring-4
-                    focus-within:ring-emerald-50
-                  ">
-
+                  <div
+                    className="
+                      flex
+                      flex-1
+                      items-end
+                      rounded-2xl
+                      border
+                      border-gray-200
+                      bg-gray-50
+                      px-1.5
+                      transition
+                      focus-within:border-emerald-300
+                      focus-within:bg-white
+                      focus-within:ring-4
+                      focus-within:ring-emerald-50
+                    "
+                  >
                     <textarea
                       value={message}
-                      onChange={(event) =>
+                      onChange={(
+                        event: ChangeEvent<HTMLTextAreaElement>
+                      ) =>
                         setMessage(
                           event.target.value
                         )
                       }
-                      onKeyDown={
-                        handleKeyDown
-                      }
+                      onKeyDown={handleKeyDown}
                       placeholder="Write a message..."
                       rows={1}
                       className="
@@ -1761,7 +1751,6 @@ export default function MessagesPage() {
                         placeholder:text-gray-400
                       "
                     />
-
                   </div>
 
                   {/* SEND */}
@@ -1792,19 +1781,13 @@ export default function MessagesPage() {
                     "
                     aria-label="Send message"
                   >
-
                     <svg
-                      className="
-                        ml-0.5
-                        h-[18px]
-                        w-[18px]
-                      "
+                      className="ml-0.5 h-[18px] w-[18px]"
                       fill="none"
                       stroke="currentColor"
                       strokeWidth="2.3"
                       viewBox="0 0 24 24"
                     >
-
                       <path
                         strokeLinecap="round"
                         strokeLinejoin="round"
@@ -1816,25 +1799,23 @@ export default function MessagesPage() {
                         strokeLinejoin="round"
                         d="M22 2 11 13"
                       />
-
                     </svg>
-
                   </button>
-
                 </div>
 
-                <p className="
-                  mx-auto
-                  mt-1.5
-                  hidden
-                  max-w-4xl
-                  text-[10px]
-                  text-gray-400
-                  sm:block
-                ">
+                <p
+                  className="
+                    mx-auto
+                    mt-1.5
+                    hidden
+                    max-w-4xl
+                    text-[10px]
+                    text-gray-400
+                    sm:block
+                  "
+                >
                   Press Enter to send · Shift + Enter for a new line
                 </p>
-
               </footer>
             </>
           )}

@@ -43,6 +43,22 @@ function normalizeRole(
 }
 
 /**
+ * Check whether API response looks like LoginResponse.
+ */
+function isLoginResponse(
+  value: unknown
+): value is LoginResponse {
+  if (
+    typeof value !== "object" ||
+    value === null
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * JWT se role nikalna
  */
 function getRoleFromToken(
@@ -57,12 +73,10 @@ function getRoleFromToken(
 
     const payload = parts[1];
 
-    // Base64URL -> Base64
     const base64 = payload
       .replace(/-/g, "+")
       .replace(/_/g, "/");
 
-    // Padding add
     const paddedBase64 =
       base64 +
       "=".repeat(
@@ -79,9 +93,9 @@ function getRoleFromToken(
     );
 
     return normalizeRole(
-      decoded.role ||
-        decoded.user_role ||
-        decoded.user?.role
+      decoded?.role ||
+        decoded?.user_role ||
+        decoded?.user?.role
     );
   } catch (error) {
     console.error(
@@ -167,13 +181,11 @@ export default function Login() {
         localStorage.getItem("role")
       );
 
-    // Token nahi hai -> login page show karo
     if (!accessToken) {
       setCheckingAuth(false);
       return;
     }
 
-    // Token + role available -> dashboard
     if (savedRole) {
       const redirected =
         redirectByRole(
@@ -185,7 +197,6 @@ export default function Login() {
       }
     }
 
-    // Invalid session clear karo
     localStorage.removeItem(
       "access_token"
     );
@@ -244,11 +255,8 @@ export default function Login() {
 
       /**
        * Backend Login
-       *
-       * IMPORTANT:
-       * Direct fetch ki jagah apiFetch use ho raha hai.
        */
-      const data: LoginResponse =
+      const rawData =
         await apiFetch(
           "/auth/login",
           {
@@ -260,6 +268,17 @@ export default function Login() {
             }),
           }
         );
+
+      /**
+       * API response validate
+       */
+      if (!isLoginResponse(rawData)) {
+        throw new Error(
+          "Invalid login response from server."
+        );
+      }
+
+      const data = rawData;
 
       console.log(
         "LOGIN RESPONSE:",
@@ -336,9 +355,6 @@ export default function Login() {
        * ------------------------------------------------
        * FIND ROLE FROM JWT
        * ------------------------------------------------
-       *
-       * Agar API response me role nahi hai,
-       * JWT se role nikalo.
        */
       if (!role) {
         role =

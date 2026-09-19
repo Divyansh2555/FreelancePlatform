@@ -7,10 +7,17 @@ type ApiFetchOptions = RequestInit & {
   auth?: boolean;
 };
 
-export async function apiFetch(
+/**
+ * Generic API response type.
+ *
+ * Example:
+ * apiFetch<LoginResponse>(...)
+ * apiFetch<RegisterResponse>(...)
+ */
+export async function apiFetch<T = unknown>(
   endpoint: string,
   options: ApiFetchOptions = {}
-) {
+): Promise<T> {
   const {
     auth = false,
     headers: customHeaders,
@@ -25,8 +32,14 @@ export async function apiFetch(
 
   headers.set("Accept", "application/json");
 
-  // Sirf authenticated request me token bhejo
-  if (auth && typeof window !== "undefined") {
+  // ---------------------------------------------------------
+  // AUTH TOKEN
+  // ---------------------------------------------------------
+
+  if (
+    auth &&
+    typeof window !== "undefined"
+  ) {
     const token =
       localStorage.getItem("access_token");
 
@@ -38,6 +51,10 @@ export async function apiFetch(
     }
   }
 
+  // ---------------------------------------------------------
+  // REQUEST
+  // ---------------------------------------------------------
+
   const response = await fetch(
     `${API_URL}${endpoint}`,
     {
@@ -47,20 +64,36 @@ export async function apiFetch(
     }
   );
 
+  // ---------------------------------------------------------
+  // RESPONSE PARSE
+  // ---------------------------------------------------------
+
   const contentType =
     response.headers.get("content-type") || "";
 
   let data: unknown;
 
-  if (contentType.includes("application/json")) {
+  if (
+    contentType.includes(
+      "application/json"
+    )
+  ) {
     try {
       data = await response.json();
     } catch {
       data = null;
     }
   } else {
-    data = await response.text();
+    try {
+      data = await response.text();
+    } catch {
+      data = "";
+    }
   }
+
+  // ---------------------------------------------------------
+  // ERROR
+  // ---------------------------------------------------------
 
   if (!response.ok) {
     let errorMessage = "Request failed";
@@ -73,17 +106,23 @@ export async function apiFetch(
         data as Record<string, unknown>;
 
       if (
-        typeof errorData.detail === "string"
+        typeof errorData.detail ===
+        "string"
       ) {
-        errorMessage = errorData.detail;
+        errorMessage =
+          errorData.detail;
       } else if (
-        typeof errorData.message === "string"
+        typeof errorData.message ===
+        "string"
       ) {
-        errorMessage = errorData.message;
+        errorMessage =
+          errorData.message;
       } else if (
-        typeof errorData.error === "string"
+        typeof errorData.error ===
+        "string"
       ) {
-        errorMessage = errorData.error;
+        errorMessage =
+          errorData.error;
       }
     } else if (
       typeof data === "string" &&
@@ -95,5 +134,9 @@ export async function apiFetch(
     throw new Error(errorMessage);
   }
 
-  return data;
+  // ---------------------------------------------------------
+  // SUCCESS
+  // ---------------------------------------------------------
+
+  return data as T;
 }
