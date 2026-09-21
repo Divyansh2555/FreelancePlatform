@@ -260,24 +260,29 @@ type Category = keyof typeof categoryData;
 
 export default function Navbar() {
   const [hireOpen, setHireOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [activeCategory, setActiveCategory] =
     useState<Category>("AI & Automation");
 
+  const closeMobileMenu = () => {
+    setMobileOpen(false);
+    setHireOpen(false);
+  };
+
   return (
     <header className="relative z-[100] border-b border-gray-100 bg-white">
-      <nav className="mx-auto flex h-[72px] max-w-7xl items-center justify-between px-5 sm:px-8 lg:px-10">
-
+      <nav className="mx-auto flex h-[68px] max-w-7xl items-center justify-between px-4 sm:h-[72px] sm:px-8 lg:px-10">
         {/* LOGO */}
         <Link
           href="/"
-          className="text-2xl font-black tracking-tight text-gray-950"
+          onClick={closeMobileMenu}
+          className="shrink-0 text-[22px] font-black tracking-tight text-gray-950 sm:text-2xl"
         >
           Your<span className="text-emerald-600">Work</span>
         </Link>
 
-        {/* NAVIGATION */}
-        <div className="hidden h-full items-center gap-8 md:flex">
-
+        {/* DESKTOP NAV */}
+        <div className="hidden h-full items-center gap-7 md:flex lg:gap-8">
           <Link
             href="/"
             className="text-sm font-medium text-gray-700 transition hover:text-emerald-600"
@@ -292,7 +297,7 @@ export default function Navbar() {
             About
           </Link>
 
-          {/* HIRE */}
+          {/* DESKTOP HIRE */}
           <div
             className="flex h-full items-center"
             onMouseEnter={() => setHireOpen(true)}
@@ -337,42 +342,266 @@ export default function Navbar() {
           </Link>
         </div>
 
-        {/* RIGHT AUTH */}
-        <div className="flex items-center gap-3">
-
-          {/* LOGIN */}
+        {/* DESKTOP AUTH */}
+        <div className="hidden items-center gap-4 sm:flex">
           <Link
             href="/auth/login"
-            className="hidden text-sm font-semibold text-gray-700 hover:text-emerald-600 sm:block"
+            className="text-sm font-semibold text-gray-700 transition hover:text-emerald-600"
           >
             Log in
           </Link>
 
-          {/* REGISTER */}
           <Link
             href="/auth/register"
             className="rounded-xl bg-gray-950 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-600"
           >
             Sign up
           </Link>
+        </div>
 
+        {/* MOBILE RIGHT */}
+        <div className="flex items-center gap-2 sm:hidden">
+          <Link
+            href="/auth/login"
+            className="px-2 py-2 text-sm font-semibold text-gray-700"
+          >
+            Log in
+          </Link>
+
+          <Link
+            href="/auth/register"
+            className="rounded-lg bg-gray-950 px-3.5 py-2 text-xs font-bold text-white"
+          >
+            Sign up
+          </Link>
+
+          <button
+            type="button"
+            aria-label={mobileOpen ? "Close menu" : "Open menu"}
+            aria-expanded={mobileOpen}
+            onClick={() => setMobileOpen((prev) => !prev)}
+            className="ml-1 flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-900"
+          >
+            {mobileOpen ? (
+              <svg
+                className="h-5 w-5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            ) : (
+              <svg
+                className="h-5 w-5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M4 7h16M4 12h16M4 17h16" />
+              </svg>
+            )}
+          </button>
         </div>
       </nav>
 
-      {/* HIRE MEGA MENU */}
+      {/* ================= MOBILE MENU ================= */}
+      {mobileOpen && (
+        <div className="border-t border-gray-100 bg-white shadow-lg md:hidden">
+          <div className="max-h-[calc(100vh-68px)] overflow-y-auto px-4 py-4">
+            {/* MAIN LINKS */}
+            <div className="space-y-1">
+              <Link
+                href="/"
+                onClick={closeMobileMenu}
+                className="block rounded-xl px-4 py-3.5 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+              >
+                Home
+              </Link>
+
+              <Link
+                href="/about"
+                onClick={closeMobileMenu}
+                className="block rounded-xl px-4 py-3.5 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+              >
+                About
+              </Link>
+
+              {/* MOBILE HIRE */}
+              <button
+                type="button"
+                onClick={() => setHireOpen((prev) => !prev)}
+                className={`flex w-full items-center justify-between rounded-xl px-4 py-3.5 text-left text-sm font-semibold transition ${
+                  hireOpen
+                    ? "bg-emerald-50 text-emerald-700"
+                    : "text-gray-700 hover:bg-gray-50"
+                }`}
+              >
+                <span>Hire freelancers</span>
+
+                <svg
+                  className={`h-4 w-4 transition-transform ${
+                    hireOpen ? "rotate-180" : ""
+                  }`}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </button>
+
+              {/* MOBILE HIRE CONTENT */}
+              {hireOpen && (
+                <div className="mt-2 rounded-2xl border border-gray-100 bg-gray-50 p-2">
+                  <Link
+                    href="/hire"
+                    onClick={closeMobileMenu}
+                    className="mb-2 flex items-center justify-between rounded-xl bg-gray-950 px-4 py-3 text-sm font-bold text-white"
+                  >
+                    <span>Browse all freelancers</span>
+                    <span>→</span>
+                  </Link>
+
+                  <div className="space-y-1">
+                    {categories.map((category) => (
+                      <div key={category}>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setActiveCategory(category as Category)
+                          }
+                          className={`flex w-full items-center justify-between rounded-xl px-3 py-3 text-left text-sm font-semibold transition ${
+                            activeCategory === category
+                              ? "bg-white text-emerald-700 shadow-sm"
+                              : "text-gray-600 hover:bg-white"
+                          }`}
+                        >
+                          <span className="flex min-w-0 items-center gap-3">
+                            <span
+                              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs ${
+                                activeCategory === category
+                                  ? "bg-emerald-600 text-white"
+                                  : "bg-gray-200 text-gray-500"
+                              }`}
+                            >
+                              {getCategoryIcon(category)}
+                            </span>
+
+                            <span className="truncate">{category}</span>
+                          </span>
+
+                          <svg
+                            className={`h-4 w-4 shrink-0 transition-transform ${
+                              activeCategory === category
+                                ? "rotate-90 text-emerald-600"
+                                : "text-gray-400"
+                            }`}
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          >
+                            <path d="m9 18 6-6-6-6" />
+                          </svg>
+                        </button>
+
+                        {/* MOBILE SERVICES */}
+                        {activeCategory === category && (
+                          <div className="mt-1 space-y-1 px-1 pb-2">
+                            {categoryData[category].map((item) => (
+                              <Link
+                                key={item.title}
+                                href={item.href}
+                                onClick={closeMobileMenu}
+                                className="block rounded-xl bg-white px-3 py-3 transition active:bg-emerald-50"
+                              >
+                                <div className="flex items-start gap-3">
+                                  <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+                                    <svg
+                                      className="h-4 w-4"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="1.8"
+                                    >
+                                      <path d="M12 3v18M3 12h18" />
+                                    </svg>
+                                  </div>
+
+                                  <div className="min-w-0">
+                                    <h3 className="text-sm font-bold leading-5 text-gray-900">
+                                      {item.title}
+                                    </h3>
+
+                                    <p className="mt-0.5 text-xs leading-5 text-gray-500">
+                                      {item.desc}
+                                    </p>
+                                  </div>
+                                </div>
+                              </Link>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <Link
+                href="/how-it-works"
+                onClick={closeMobileMenu}
+                className="block rounded-xl px-4 py-3.5 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+              >
+                How it works
+              </Link>
+
+              <Link
+                href="/contact"
+                onClick={closeMobileMenu}
+                className="block rounded-xl px-4 py-3.5 text-sm font-semibold text-gray-700 hover:bg-gray-50"
+              >
+                Contact
+              </Link>
+            </div>
+
+            {/* MOBILE AUTH */}
+            <div className="mt-4 border-t border-gray-100 pt-4">
+              <Link
+                href="/auth/login"
+                onClick={closeMobileMenu}
+                className="flex w-full items-center justify-center rounded-xl border border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700"
+              >
+                Log in
+              </Link>
+
+              <Link
+                href="/auth/register"
+                onClick={closeMobileMenu}
+                className="mt-2 flex w-full items-center justify-center rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white"
+              >
+                Create an account
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= DESKTOP MEGA MENU ================= */}
       {hireOpen && (
         <div
-          className="absolute left-0 top-[72px] w-full border-t border-gray-100 bg-white shadow-[0_25px_60px_rgba(0,0,0,.10)]"
+          className="absolute left-0 top-[72px] hidden w-full border-t border-gray-100 bg-white shadow-[0_25px_60px_rgba(0,0,0,.10)] md:block"
           onMouseEnter={() => setHireOpen(true)}
           onMouseLeave={() => setHireOpen(false)}
         >
           <div className="mx-auto max-w-7xl px-5 py-7 sm:px-8 lg:px-10">
-
             <div className="grid grid-cols-[235px_1fr] gap-8">
-
               {/* CATEGORIES */}
               <aside className="border-r border-gray-100 pr-6">
-
                 <div className="mb-4">
                   <p className="text-xs font-bold uppercase tracking-[.18em] text-gray-400">
                     Categories
@@ -423,7 +652,6 @@ export default function Navbar() {
 
               {/* SERVICES */}
               <div className="min-w-0">
-
                 <div className="mb-6 flex items-end justify-between">
                   <div>
                     <p className="text-xs font-bold uppercase tracking-[.18em] text-emerald-600">
@@ -451,7 +679,6 @@ export default function Navbar() {
                       className="group rounded-xl p-3.5 transition hover:bg-emerald-50"
                     >
                       <div className="flex items-start gap-3">
-
                         <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-gray-500 transition group-hover:bg-emerald-600 group-hover:text-white">
                           <svg
                             className="h-4 w-4"
@@ -473,13 +700,11 @@ export default function Navbar() {
                             {item.desc}
                           </p>
                         </div>
-
                       </div>
                     </Link>
                   ))}
                 </div>
 
-                {/* CTA */}
                 <div className="mt-5 flex items-center justify-between rounded-xl bg-gray-50 px-5 py-3.5">
                   <p className="text-sm text-gray-500">
                     Can't find what you're looking for?
@@ -492,7 +717,6 @@ export default function Navbar() {
                     Browse all freelancers →
                   </Link>
                 </div>
-
               </div>
             </div>
           </div>
