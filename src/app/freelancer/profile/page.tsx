@@ -816,27 +816,7 @@ export default function FreelancerProfilePage() {
 
             </section>
 
-            {/* Danger zone */}
-            <section className="rounded-3xl border border-red-100 bg-red-50/50 p-6">
 
-              <h3 className="font-bold text-red-700">
-                Danger Zone
-              </h3>
-
-              <p className="mt-2 text-xs leading-5 text-red-500">
-                Deleting your profile will remove your freelancer
-                profile from the platform.
-              </p>
-
-              <button
-                onClick={handleDelete}
-                disabled={deleting}
-                className="mt-4 w-full rounded-xl border border-red-200 bg-white px-4 py-3 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {deleting ? "Deleting..." : "Delete Profile"}
-              </button>
-
-            </section>
 
           </aside>
 
