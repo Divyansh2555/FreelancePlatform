@@ -1,106 +1,124 @@
 "use client";
 
-import {
-  FormEvent,
-  useState,
-} from "react";
+import { FormEvent, useState } from "react";
 import Link from "next/link";
 
 import { register } from "../../lib/api/services/auth";
 import type { UserRole } from "../../types/auth";
 
+type RegisterResponse = {
+  id?: number | string;
+  name?: string;
+  email?: string;
+  role?: UserRole;
+  detail?: string;
+  message?: string;
+};
+
 export default function RegisterForm() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [password, setPassword] =
-    useState("");
+  const [password, setPassword] = useState("");
+  const [role, setRole] = useState<UserRole>("client");
 
-  const [role, setRole] =
-    useState<UserRole>("client");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const [loading, setLoading] =
-    useState(false);
-
-  const [error, setError] =
-    useState("");
-
-  async function handleSubmit(
-    e: FormEvent<HTMLFormElement>
-  ) {
+  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
 
-    if (loading) {
+    if (loading) return;
+
+    setError("");
+
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim().toLowerCase();
+
+    // =========================
+    // Validation
+    // =========================
+
+    if (!trimmedName) {
+      setError("Please enter your name.");
       return;
     }
 
-    setLoading(true);
-    setError("");
+    if (!trimmedEmail) {
+      setError("Please enter your email.");
+      return;
+    }
+
+    if (!password) {
+      setError("Please enter your password.");
+      return;
+    }
+
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters.");
+      return;
+    }
 
     try {
-      const payload = {
-        name: name.trim(),
-        email: email.trim(),
+      setLoading(true);
+
+      // =========================
+      // Register
+      // =========================
+      //
+      // register() expects 4 arguments:
+      // name, email, password, role
+      //
+      const data: RegisterResponse = await register(
+        trimmedName,
+        trimmedEmail,
         password,
-        role,
-      };
-
-      // Validation
-      if (!payload.name) {
-        throw new Error(
-          "Please enter your name."
-        );
-      }
-
-      if (!payload.email) {
-        throw new Error(
-          "Please enter your email."
-        );
-      }
-
-      if (!payload.password) {
-        throw new Error(
-          "Please enter your password."
-        );
-      }
-
-      if (payload.password.length < 6) {
-        throw new Error(
-          "Password must be at least 6 characters."
-        );
-      }
-
-      // Register API
-      const data = await register(
-        payload
+        role
       );
 
-      console.log(
-        "Register response:",
-        data
-      );
+      console.log("Register response:", data);
 
-      // Validate response
+      // =========================
+      // Backend error response
+      // =========================
+
       if (
+        !data ||
         data.id === undefined ||
         data.id === null
       ) {
         throw new Error(
-          data.detail ||
-            data.message ||
-            "Registration response is invalid."
+          data?.detail ||
+            data?.message ||
+            "Registration failed. Invalid server response."
         );
       }
 
-      // Backend role first,
-      // selected role as fallback
-      const userRole =
+      // =========================
+      // Valid application role
+      // =========================
+
+      const userRole: UserRole =
         data.role === "client" ||
         data.role === "freelancer" ||
         data.role === "admin"
           ? data.role
           : role;
 
-      // Save user information
+      // =========================
+      // User object
+      // =========================
+
+      const user = {
+        id: data.id,
+        name: data.name || trimmedName,
+        email: data.email || trimmedEmail,
+        role: userRole,
+      };
+
+      // =========================
+      // Save user data
+      // =========================
+
       localStorage.setItem(
         "user_id",
         String(data.id)
@@ -113,60 +131,49 @@ export default function RegisterForm() {
 
       localStorage.setItem(
         "email",
-        data.email ||
-          payload.email
+        user.email
       );
 
       localStorage.setItem(
         "user",
-        JSON.stringify({
-          id: data.id,
-          name:
-            data.name ||
-            payload.name,
-          email:
-            data.email ||
-            payload.email,
-          role: userRole,
-        })
+        JSON.stringify(user)
       );
 
-      // Role based redirect
-      if (userRole === "client") {
-        window.location.replace(
-          "/client"
-        );
-        return;
-      }
+      // =========================
+      // Redirect according to role
+      // =========================
 
-      if (userRole === "freelancer") {
-        window.location.replace(
-          "/freelancer"
-        );
-        return;
-      }
+      switch (userRole) {
+        case "client":
+          window.location.replace("/client");
+          return;
 
-      if (userRole === "admin") {
-        window.location.replace(
-          "/admin"
-        );
-        return;
-      }
+        case "freelancer":
+          window.location.replace("/freelancer");
+          return;
 
-      throw new Error(
-        `Unsupported user role: ${userRole}`
-      );
-    } catch (err) {
+        case "admin":
+          window.location.replace("/admin");
+          return;
+
+        default:
+          throw new Error(
+            `Unsupported user role: ${userRole}`
+          );
+      }
+    } catch (err: unknown) {
       console.error(
         "Registration error:",
         err
       );
 
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Something went wrong."
-      );
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError(
+          "Something went wrong. Please try again."
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -199,7 +206,6 @@ export default function RegisterForm() {
 
         {/* Register Card */}
         <div className="rounded-2xl border border-gray-100 bg-white p-7 shadow-xl shadow-blue-100/50 sm:p-8">
-
           <form
             onSubmit={handleSubmit}
             className="space-y-5"
@@ -216,6 +222,7 @@ export default function RegisterForm() {
 
               <input
                 id="name"
+                name="name"
                 type="text"
                 value={name}
                 onChange={(e) =>
@@ -240,6 +247,7 @@ export default function RegisterForm() {
 
               <input
                 id="email"
+                name="email"
                 type="email"
                 value={email}
                 onChange={(e) =>
@@ -264,12 +272,11 @@ export default function RegisterForm() {
 
               <input
                 id="password"
+                name="password"
                 type="password"
                 value={password}
                 onChange={(e) =>
-                  setPassword(
-                    e.target.value
-                  )
+                  setPassword(e.target.value)
                 }
                 placeholder="Enter your password"
                 autoComplete="new-password"
@@ -291,6 +298,7 @@ export default function RegisterForm() {
 
               <select
                 id="role"
+                name="role"
                 value={role}
                 onChange={(e) =>
                   setRole(
@@ -313,7 +321,10 @@ export default function RegisterForm() {
 
             {/* Error */}
             {error && (
-              <div className="rounded-xl border border-red-100 bg-red-50 p-4">
+              <div
+                role="alert"
+                className="rounded-xl border border-red-100 bg-red-50 p-4"
+              >
                 <p className="text-sm font-medium text-red-600">
                   {error}
                 </p>
@@ -356,6 +367,7 @@ export default function RegisterForm() {
         <p className="mt-6 text-center text-xs text-gray-400">
           © 2026 FreelanceHub. All rights reserved.
         </p>
+
       </div>
     </main>
   );

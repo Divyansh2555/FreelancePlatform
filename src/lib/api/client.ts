@@ -22,13 +22,33 @@ export async function apiFetch<T>(
     }
   );
 
-  const data = await response.json();
+  let data: unknown = null;
+
+  try {
+    data = await response.json();
+  } catch {
+    data = null;
+  }
 
   if (!response.ok) {
+    if (
+      typeof data === "object" &&
+      data !== null
+    ) {
+      const errorData = data as {
+        detail?: string;
+        message?: string;
+      };
+
+      throw new Error(
+        errorData.detail ||
+          errorData.message ||
+          `Request failed with status ${response.status}`
+      );
+    }
+
     throw new Error(
-      data?.detail ||
-        data?.message ||
-        "Something went wrong"
+      `Request failed with status ${response.status}`
     );
   }
 

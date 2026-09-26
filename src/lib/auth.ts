@@ -1,18 +1,30 @@
+import type { UserRole } from "../types/auth";
+
+// =========================
+// Normalize Role
+// =========================
+
 export function normalizeRole(
   role: unknown
-): string | null {
-  if (!role) {
+): UserRole | null {
+  if (
+    role !== "client" &&
+    role !== "freelancer" &&
+    role !== "admin"
+  ) {
     return null;
   }
 
-  return String(role)
-    .trim()
-    .toLowerCase();
+  return role;
 }
+
+// =========================
+// Get Role From JWT Token
+// =========================
 
 export function getRoleFromToken(
   token: string
-): string | null {
+): UserRole | null {
   try {
     const parts = token.split(".");
 
@@ -49,31 +61,40 @@ export function getRoleFromToken(
   }
 }
 
-export function redirectByRole(
-  role: string
-): boolean {
+// =========================
+// Get Role Redirect Path
+// =========================
+
+export function getRoleRedirectPath(
+  role: unknown
+): string | null {
   const normalizedRole =
     normalizeRole(role);
 
   if (normalizedRole === "client") {
-    window.location.replace("/client");
-    return true;
+    return "/client";
   }
 
   if (normalizedRole === "freelancer") {
-    window.location.replace("/freelancer");
-    return true;
+    return "/freelancer";
   }
 
   if (normalizedRole === "admin") {
-    window.location.replace("/admin");
-    return true;
+    return "/admin";
   }
 
-  return false;
+  return null;
 }
 
-export function clearAuth() {
+// =========================
+// Clear Authentication
+// =========================
+
+export function clearAuth(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
   localStorage.removeItem("access_token");
   localStorage.removeItem("refresh_token");
   localStorage.removeItem("role");
