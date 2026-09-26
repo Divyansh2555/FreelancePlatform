@@ -4,7 +4,7 @@ if (!envBaseUrl) {
   throw new Error("NEXT_PUBLIC_API_BASE_URL is not defined");
 }
 
-const API_BASE_URL: string = envBaseUrl;
+const API_BASE_URL = envBaseUrl;
 
 export async function apiFetch<T>(
   endpoint: string,
@@ -19,7 +19,6 @@ export async function apiFetch<T>(
 
   headers.set("Accept", "application/json");
 
-  // FormData ke saath Content-Type manually set mat karo.
   if (!(options.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
@@ -31,12 +30,8 @@ export async function apiFetch<T>(
     );
   }
 
-  // Remove trailing slash from base URL
   const baseUrl = API_BASE_URL.replace(/\/+$/, "");
-
-  // Remove leading slash from endpoint
   const cleanEndpoint = endpoint.replace(/^\/+/, "");
-
   const url = `${baseUrl}/${cleanEndpoint}`;
 
   console.log("[apiFetch] REQUEST", {
@@ -52,10 +47,6 @@ export async function apiFetch<T>(
     cache: "no-store",
   });
 
-  /*
-   * Response ko pehle text ke form mein read karte hain.
-   * Isse empty response / HTML error / invalid JSON bhi clearly dikhega.
-   */
   const rawText = await response.text();
 
   let data: unknown = null;
@@ -76,14 +67,6 @@ export async function apiFetch<T>(
   });
 
   if (!response.ok) {
-    console.error("[apiFetch] ERROR", {
-      status: response.status,
-      statusText: response.statusText,
-      endpoint,
-      url,
-      response: data,
-    });
-
     if (response.status === 401) {
       if (typeof window !== "undefined") {
         localStorage.removeItem("access_token");
@@ -155,9 +138,6 @@ export async function apiFetch<T>(
     );
   }
 
-  /*
-   * 204 No Content / empty response
-   */
   if (response.status === 204 || !rawText.trim()) {
     return null as T;
   }
