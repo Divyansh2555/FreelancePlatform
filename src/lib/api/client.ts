@@ -19,6 +19,7 @@ export async function apiFetch<T>(
 
   headers.set("Accept", "application/json");
 
+  // FormData ke saath Content-Type manually set mat karo.
   if (!(options.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
@@ -30,8 +31,12 @@ export async function apiFetch<T>(
     );
   }
 
+  // Base URL ke end ka slash remove karo.
   const baseUrl = API_BASE_URL.replace(/\/+$/, "");
+
+  // Endpoint ke start ka slash remove karo.
   const cleanEndpoint = endpoint.replace(/^\/+/, "");
+
   const url = `${baseUrl}/${cleanEndpoint}`;
 
   console.log("[apiFetch] REQUEST", {
@@ -67,6 +72,14 @@ export async function apiFetch<T>(
   });
 
   if (!response.ok) {
+    console.error("[apiFetch] ERROR", {
+      status: response.status,
+      statusText: response.statusText,
+      endpoint,
+      url,
+      response: data,
+    });
+
     if (response.status === 401) {
       if (typeof window !== "undefined") {
         localStorage.removeItem("access_token");
