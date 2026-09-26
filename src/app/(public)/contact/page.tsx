@@ -1,10 +1,5 @@
+import Contact from "@/src/components/public/contacts";
 
-
-
-export default function Contact() {
-    return(
-        <>
-        <p> Contact Page </p>
-        </>
-    );
+export default function ContactPage() {
+    return <Contact />;
 }
