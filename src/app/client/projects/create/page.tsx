@@ -1,666 +1,745 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
-type FormData = {
+type Project = {
+  id: number;
+  client_id: number;
+  title: string;
+  description: string;
+  category: string | null;
+  budget_type: "fixed" | "hourly";
+  budget_min: string | number | null;
+  budget_max: string | number | null;
+  experience_level: "entry" | "intermediate" | "expert" | null;
+  deadline: string | null;
+  location: string | null;
+  status:
+    | "draft"
+    | "open"
+    | "in_progress"
+    | "completed"
+    | "cancelled";
+  created_at: string;
+  updated_at: string;
+};
+
+type ProjectForm = {
   title: string;
   description: string;
   category: string;
   budget_type: "fixed" | "hourly";
   budget_min: string;
   budget_max: string;
-  experience_level: "beginner" | "intermediate" | "expert";
+  experience_level: "entry" | "intermediate" | "expert";
   deadline: string;
   location: string;
 };
 
-const initialForm: FormData = {
+const initialForm: ProjectForm = {
   title: "",
   description: "",
   category: "",
   budget_type: "fixed",
   budget_min: "",
   budget_max: "",
-  experience_level: "intermediate",
+  experience_level: "entry",
   deadline: "",
   location: "",
 };
 
 function getApiError(data: any): string {
-  if (!data) {
-    return "Failed to create project.";
-  }
+  if (!data) return "Something went wrong.";
 
-  // FastAPI string error
   if (typeof data.detail === "string") {
     return data.detail;
   }
 
-  // FastAPI validation errors
   if (Array.isArray(data.detail)) {
     return data.detail
-      .map((item: any) => {
-        if (typeof item === "string") {
-          return item;
-        }
-
-        if (item?.msg) {
-          const location = Array.isArray(item.loc)
-            ? item.loc.join(" → ")
-            : "";
-
-          return location
-            ? `${location}: ${item.msg}`
-            : item.msg;
-        }
-
-        return JSON.stringify(item);
-      })
+      .map((item: any) => item?.msg || String(item))
       .join("\n");
-  }
-
-  // Object error
-  if (typeof data.detail === "object") {
-    return JSON.stringify(data.detail);
   }
 
   if (typeof data.message === "string") {
     return data.message;
   }
 
-  return "Failed to create project.";
+  return "Something went wrong.";
 }
 
-export default function PostProjectPage() {
-  const [form, setForm] = useState<FormData>(initialForm);
-  const [loading, setLoading] = useState(false);
+async function readResponse(response: Response) {
+  const contentType = response.headers.get("content-type") || "";
+
+  if (contentType.includes("application/json")) {
+    return response.json();
+  }
+
+  const text = await response.text();
+
+  return { detail: text || "Unexpected server response." };
+}
+
+function formatDate(date: string | null) {
+  if (!date) return "No deadline";
+
+  const parsed = new Date(date);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "Invalid date";
+  }
+
+  return parsed.toLocaleDateString();
+}
+
+function formatBudget(
+  min: string | number | null,
+  max: string | number | null,
+  type: "fixed" | "hourly"
+) {
+  const minimum = min !== null ? Number(min) : null;
+  const maximum = max !== null ? Number(max) : null;
+
+  const suffix = type === "hourly" ? "/hr" : "";
+
+  if (minimum !== null && maximum !== null) {
+    return `₹${minimum.toLocaleString()} - ₹${maximum.toLocaleString()}${suffix}`;
+  }
+
+  if (minimum !== null) {
+    return `From ₹${minimum.toLocaleString()}${suffix}`;
+  }
+
+  if (maximum !== null) {
+    return `Up to ₹${maximum.toLocaleString()}${suffix}`;
+  }
+
+  return "Budget not specified";
+}
+
+function getStatusClasses(status: Project["status"]) {
+  switch (status) {
+    case "open":
+      return "bg-emerald-50 text-emerald-700 border-emerald-200";
+
+    case "in_progress":
+      return "bg-blue-50 text-blue-700 border-blue-200";
+
+    case "completed":
+      return "bg-purple-50 text-purple-700 border-purple-200";
+
+    case "cancelled":
+      return "bg-red-50 text-red-700 border-red-200";
+
+    default:
+      return "bg-slate-100 text-slate-700 border-slate-200";
+  }
+}
+
+function formatStatus(status: Project["status"]) {
+  return status
+    .replace("_", " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatExperience(
+  experience: Project["experience_level"]
+) {
+  if (!experience) return "Not specified";
+
+  return experience.charAt(0).toUpperCase() + experience.slice(1);
+}
+
+export default function MyProjectsPage() {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  const handleChange = (
-    e: React.ChangeEvent<
-      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
-    >
-  ) => {
-    const { name, value } = e.target;
+  const [form, setForm] = useState<ProjectForm>(initialForm);
 
-    setForm((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+  // =========================
+  // GET MY PROJECTS
+  // =========================
 
-    setError("");
-    setSuccess("");
-  };
-
-  const handleSubmit = async (
-    e: FormEvent<HTMLFormElement>
-  ) => {
-    e.preventDefault();
-
+  const fetchMyProjects = useCallback(async () => {
     setLoading(true);
     setError("");
-    setSuccess("");
 
     try {
-      // =========================
-      // CHECK LOGIN
-      // =========================
-
       const token = localStorage.getItem("access_token");
 
       if (!token) {
-        throw new Error(
-          "You are not logged in. Please login first."
-        );
+        throw new Error("Please login first.");
       }
 
-      // =========================
-      // FRONTEND VALIDATION
-      // =========================
-
-      if (!form.title.trim()) {
-        throw new Error("Project title is required.");
-      }
-
-      if (!form.description.trim()) {
-        throw new Error(
-          "Project description is required."
-        );
-      }
-
-      if (!form.category.trim()) {
-        throw new Error("Category is required.");
-      }
-
-      // =========================
-      // BUDGET VALIDATION
-      // =========================
-
-      const budgetMin =
-        form.budget_min.trim() === ""
-          ? null
-          : Number(form.budget_min);
-
-      const budgetMax =
-        form.budget_max.trim() === ""
-          ? null
-          : Number(form.budget_max);
-
-      if (
-        budgetMin !== null &&
-        (Number.isNaN(budgetMin) || budgetMin < 0)
-      ) {
-        throw new Error(
-          "Minimum budget must be a valid positive number."
-        );
-      }
-
-      if (
-        budgetMax !== null &&
-        (Number.isNaN(budgetMax) || budgetMax < 0)
-      ) {
-        throw new Error(
-          "Maximum budget must be a valid positive number."
-        );
-      }
-
-      if (
-        budgetMin !== null &&
-        budgetMax !== null &&
-        budgetMin > budgetMax
-      ) {
-        throw new Error(
-          "Minimum budget cannot be greater than maximum budget."
-        );
-      }
-
-      // =========================
-      // DEADLINE
-      // =========================
-
-      let deadline: string | null = null;
-
-      if (form.deadline) {
-        const deadlineDate = new Date(form.deadline);
-
-        if (Number.isNaN(deadlineDate.getTime())) {
-          throw new Error(
-            "Please select a valid deadline."
-          );
+      const response = await fetch(
+        `${API_URL}/api/v1/projects/my`,
+        {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          cache: "no-store",
         }
+      );
 
-        deadline = deadlineDate.toISOString();
+      const data = await readResponse(response);
+
+      if (!response.ok) {
+        throw new Error(getApiError(data));
       }
 
-      // =========================
-      // REQUEST PAYLOAD
-      // =========================
+      if (!Array.isArray(data)) {
+        throw new Error("Invalid projects response.");
+      }
+
+      setProjects(data);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to load projects."
+      );
+
+      setProjects([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchMyProjects();
+  }, [fetchMyProjects]);
+
+  // =========================
+  // HANDLE FORM INPUT
+  // =========================
+
+  function handleChange(
+    e: React.ChangeEvent<
+      HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+    >
+  ) {
+    const { name, value } = e.target;
+
+    setForm((previous) => ({
+      ...previous,
+      [name]: value,
+    }));
+  }
+
+  // =========================
+  // POST NEW PROJECT
+  // =========================
+
+  async function handlePostProject(
+    e: React.FormEvent<HTMLFormElement>
+  ) {
+    e.preventDefault();
+
+    setError("");
+    setSuccess("");
+
+    if (!form.title.trim() || !form.description.trim()) {
+      setError("Title and description are required.");
+      return;
+    }
+
+    const min = form.budget_min
+      ? Number(form.budget_min)
+      : null;
+
+    const max = form.budget_max
+      ? Number(form.budget_max)
+      : null;
+
+    if (
+      (min !== null && (!Number.isFinite(min) || min < 0)) ||
+      (max !== null && (!Number.isFinite(max) || max < 0))
+    ) {
+      setError("Please enter valid budget amounts.");
+      return;
+    }
+
+    if (min !== null && max !== null && min > max) {
+      setError("Minimum budget cannot exceed maximum budget.");
+      return;
+    }
+
+    setSubmitting(true);
+
+    try {
+      const token = localStorage.getItem("access_token");
+
+      if (!token) {
+        throw new Error("Please login first.");
+      }
 
       const payload = {
         title: form.title.trim(),
-
         description: form.description.trim(),
-
-        category: form.category.trim(),
-
+        category: form.category.trim() || null,
         budget_type: form.budget_type,
-
-        budget_min: budgetMin,
-
-        budget_max: budgetMax,
-
+        budget_min: min,
+        budget_max: max,
         experience_level: form.experience_level,
-
-        deadline,
-
+        deadline: form.deadline || null,
         location: form.location.trim() || null,
       };
-
-      console.log(
-        "Creating project with payload:",
-        payload
-      );
-
-      // =========================
-      // CREATE PROJECT
-      // =========================
 
       const response = await fetch(
         `${API_URL}/api/v1/projects/`,
         {
           method: "POST",
-
           headers: {
             "Content-Type": "application/json",
             Accept: "application/json",
             Authorization: `Bearer ${token}`,
           },
-
           body: JSON.stringify(payload),
         }
       );
 
-      // =========================
-      // RESPONSE
-      // =========================
-
-      let data: any = null;
-
-      const contentType =
-        response.headers.get("content-type") || "";
-
-      if (contentType.includes("application/json")) {
-        data = await response.json();
-      } else {
-        const text = await response.text();
-
-        data = {
-          detail: text,
-        };
-      }
-
-      console.log(
-        "Create project response:",
-        data
-      );
-
-      // =========================
-      // API ERROR
-      // =========================
+      const data = await readResponse(response);
 
       if (!response.ok) {
-        throw new Error(
-          getApiError(data)
-        );
+        throw new Error(getApiError(data));
       }
 
-      // =========================
-      // SUCCESS
-      // =========================
+      setSuccess("Your project has been posted successfully!");
 
-      setSuccess(
-        "Project posted successfully!"
-      );
+      setForm(initialForm);
+      setShowForm(false);
 
-      setForm({
-        ...initialForm,
-      });
-
+      await fetchMyProjects();
     } catch (err) {
-      console.error(
-        "Create project error:",
-        err
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to post project."
       );
-
-      if (err instanceof Error) {
-        setError(err.message);
-      } else {
-        setError(
-          "Something went wrong while creating the project."
-        );
-      }
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
-  };
+  }
+
+  // =========================
+  // PAGE UI
+  // =========================
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-8 sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-4xl">
+      <div className="mx-auto max-w-6xl">
 
-        {/* =========================
-            HEADER
-        ========================== */}
+        {/* HEADER */}
 
         <div className="mb-8">
           <span className="inline-flex rounded-full bg-blue-50 px-4 py-1.5 text-sm font-semibold text-blue-700">
             Client Workspace
           </span>
 
-          <h1 className="mt-4 text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-            Post a Project
-          </h1>
+          <div className="mt-4 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h1 className="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
+                My Projects
+              </h1>
 
-          <p className="mt-2 text-slate-600">
-            Tell freelancers what you need and find
-            the right person for your project.
-          </p>
+              <p className="mt-2 text-slate-600">
+                Manage and post your projects.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowForm(!showForm);
+                  setError("");
+                  setSuccess("");
+                }}
+                className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+              >
+                {showForm ? "Close Form" : "+ Post New Project"}
+              </button>
+
+              <button
+                type="button"
+                onClick={fetchMyProjects}
+                disabled={loading}
+                className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {loading ? "Loading..." : "Refresh"}
+              </button>
+            </div>
+          </div>
         </div>
 
-        {/* =========================
-            SUCCESS
-        ========================== */}
+        {/* SUCCESS */}
 
         {success && (
-          <div className="mb-6 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-            <p className="text-sm font-semibold text-emerald-700">
-              {success}
-            </p>
+          <div className="mb-6 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-700">
+            {success}
           </div>
         )}
 
-        {/* =========================
-            ERROR
-        ========================== */}
+        {/* ERROR */}
 
         {error && (
-          <div className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4">
-            <p className="text-sm font-semibold text-red-700">
-              {error}
-            </p>
+          <div className="mb-6 whitespace-pre-line rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
+            {error}
           </div>
         )}
 
-        {/* =========================
-            FORM
-        ========================== */}
+        {/* POST PROJECT FORM */}
 
-        <form
-          onSubmit={handleSubmit}
-          className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8"
-        >
+        {showForm && (
+          <form
+            onSubmit={handlePostProject}
+            className="mb-10 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8"
+          >
+            <div className="mb-7">
+              <h2 className="text-2xl font-bold text-slate-900">
+                Post a New Project
+              </h2>
 
-          {/* =========================
-              PROJECT INFORMATION
-          ========================== */}
-
-          <div>
-            <h2 className="text-xl font-bold text-slate-900">
-              Project Information
-            </h2>
-
-            <p className="mt-1 text-sm text-slate-500">
-              Provide basic information about your project.
-            </p>
-          </div>
-
-          <div className="mt-6 space-y-6">
-
-            {/* TITLE */}
-
-            <div>
-              <label
-                htmlFor="title"
-                className="mb-2 block text-sm font-semibold text-slate-700"
-              >
-                Project Title
-              </label>
-
-              <input
-                id="title"
-                name="title"
-                type="text"
-                value={form.title}
-                onChange={handleChange}
-                placeholder="e.g. Build a modern business website"
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                required
-              />
+              <p className="mt-2 text-sm text-slate-500">
+                Fill in the details to find the right freelancer.
+              </p>
             </div>
 
-            {/* DESCRIPTION */}
+            <div className="grid gap-5 sm:grid-cols-2">
 
-            <div>
-              <label
-                htmlFor="description"
-                className="mb-2 block text-sm font-semibold text-slate-700"
-              >
-                Project Description
-              </label>
+              {/* TITLE */}
 
-              <textarea
-                id="description"
-                name="description"
-                value={form.description}
-                onChange={handleChange}
-                rows={7}
-                placeholder="Describe your project, requirements, features, goals, and deliverables..."
-                className="w-full resize-none rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                required
-              />
-            </div>
+              <div className="sm:col-span-2">
+                <label className="mb-2 block text-sm font-semibold text-slate-700">
+                  Project Title *
+                </label>
 
-            {/* CATEGORY */}
+                <input
+                  name="title"
+                  required
+                  maxLength={200}
+                  value={form.title}
+                  onChange={handleChange}
+                  placeholder="e.g. Build a professional website"
+                  className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                />
+              </div>
 
-            <div>
-              <label
-                htmlFor="category"
-                className="mb-2 block text-sm font-semibold text-slate-700"
-              >
-                Category
-              </label>
+              {/* DESCRIPTION */}
 
-              <input
-                id="category"
-                name="category"
-                type="text"
-                value={form.category}
-                onChange={handleChange}
-                placeholder="e.g. Web Development"
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                required
-              />
-            </div>
+              <div className="sm:col-span-2">
+                <label className="mb-2 block text-sm font-semibold text-slate-700">
+                  Project Description *
+                </label>
 
-          </div>
+                <textarea
+                  name="description"
+                  required
+                  rows={5}
+                  value={form.description}
+                  onChange={handleChange}
+                  placeholder="Explain your project requirements..."
+                  className="w-full resize-y rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                />
+              </div>
 
-          {/* =========================
-              BUDGET
-          ========================== */}
+              {/* CATEGORY */}
 
-          <div className="mt-10 border-t border-slate-100 pt-8">
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-slate-700">
+                  Category
+                </label>
 
-            <h2 className="text-xl font-bold text-slate-900">
-              Budget
-            </h2>
-
-            <p className="mt-1 text-sm text-slate-500">
-              Set the budget you are willing to pay.
-            </p>
-
-            <div className="mt-6 grid gap-6 md:grid-cols-3">
+                <input
+                  name="category"
+                  value={form.category}
+                  onChange={handleChange}
+                  placeholder="Web Development"
+                  className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-blue-500"
+                />
+              </div>
 
               {/* BUDGET TYPE */}
 
               <div>
-                <label
-                  htmlFor="budget_type"
-                  className="mb-2 block text-sm font-semibold text-slate-700"
-                >
-                  Budget Type
+                <label className="mb-2 block text-sm font-semibold text-slate-700">
+                  Budget Type *
                 </label>
 
                 <select
-                  id="budget_type"
                   name="budget_type"
                   value={form.budget_type}
                   onChange={handleChange}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none focus:border-blue-500"
                 >
-                  <option value="fixed">
-                    Fixed
-                  </option>
-
-                  <option value="hourly">
-                    Hourly
-                  </option>
+                  <option value="fixed">Fixed Price</option>
+                  <option value="hourly">Hourly Rate</option>
                 </select>
               </div>
 
-              {/* MINIMUM */}
+              {/* MIN BUDGET */}
 
               <div>
-                <label
-                  htmlFor="budget_min"
-                  className="mb-2 block text-sm font-semibold text-slate-700"
-                >
-                  Minimum Budget
+                <label className="mb-2 block text-sm font-semibold text-slate-700">
+                  Minimum Budget (₹)
                 </label>
 
                 <input
-                  id="budget_min"
                   name="budget_min"
                   type="number"
                   min="0"
                   step="0.01"
                   value={form.budget_min}
                   onChange={handleChange}
-                  placeholder="100"
-                  className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  placeholder="Minimum budget"
+                  className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-blue-500"
                 />
               </div>
 
-              {/* MAXIMUM */}
+              {/* MAX BUDGET */}
 
               <div>
-                <label
-                  htmlFor="budget_max"
-                  className="mb-2 block text-sm font-semibold text-slate-700"
-                >
-                  Maximum Budget
+                <label className="mb-2 block text-sm font-semibold text-slate-700">
+                  Maximum Budget (₹)
                 </label>
 
                 <input
-                  id="budget_max"
                   name="budget_max"
                   type="number"
                   min="0"
                   step="0.01"
                   value={form.budget_max}
                   onChange={handleChange}
-                  placeholder="500"
-                  className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  placeholder="Maximum budget"
+                  className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-blue-500"
                 />
               </div>
-
-            </div>
-          </div>
-
-          {/* =========================
-              REQUIREMENTS
-          ========================== */}
-
-          <div className="mt-10 border-t border-slate-100 pt-8">
-
-            <h2 className="text-xl font-bold text-slate-900">
-              Requirements
-            </h2>
-
-            <div className="mt-6 grid gap-6 md:grid-cols-2">
 
               {/* EXPERIENCE */}
 
               <div>
-                <label
-                  htmlFor="experience_level"
-                  className="mb-2 block text-sm font-semibold text-slate-700"
-                >
-                  Experience Level
+                <label className="mb-2 block text-sm font-semibold text-slate-700">
+                  Experience Level *
                 </label>
 
                 <select
-                  id="experience_level"
                   name="experience_level"
                   value={form.experience_level}
                   onChange={handleChange}
-                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 outline-none focus:border-blue-500"
                 >
-                  <option value="beginner">
-                    Beginner
-                  </option>
-
-                  <option value="intermediate">
-                    Intermediate
-                  </option>
-
-                  <option value="expert">
-                    Expert
-                  </option>
+                  <option value="entry">Entry Level</option>
+                  <option value="intermediate">Intermediate</option>
+                  <option value="expert">Expert</option>
                 </select>
               </div>
 
               {/* DEADLINE */}
 
               <div>
-                <label
-                  htmlFor="deadline"
-                  className="mb-2 block text-sm font-semibold text-slate-700"
-                >
-                  Deadline
+                <label className="mb-2 block text-sm font-semibold text-slate-700">
+                  Project Deadline
                 </label>
 
                 <input
-                  id="deadline"
                   name="deadline"
-                  type="datetime-local"
+                  type="date"
+                  min={new Date().toISOString().split("T")[0]}
                   value={form.deadline}
                   onChange={handleChange}
-                  className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-blue-500"
                 />
               </div>
 
+              {/* LOCATION */}
+
+              <div className="sm:col-span-2">
+                <label className="mb-2 block text-sm font-semibold text-slate-700">
+                  Location
+                </label>
+
+                <input
+                  name="location"
+                  value={form.location}
+                  onChange={handleChange}
+                  placeholder="Remote / India / Delhi"
+                  className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none focus:border-blue-500"
+                />
+              </div>
             </div>
 
-            {/* LOCATION */}
+            {/* FORM BUTTONS */}
 
-            <div className="mt-6">
-
-              <label
-                htmlFor="location"
-                className="mb-2 block text-sm font-semibold text-slate-700"
+            <div className="mt-8 flex flex-wrap gap-3 border-t border-slate-100 pt-6">
+              <button
+                type="submit"
+                disabled={submitting}
+                className="rounded-xl bg-blue-600 px-8 py-3 font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Location
-              </label>
+                {submitting ? "Posting Project..." : "Post Project"}
+              </button>
 
-              <input
-                id="location"
-                name="location"
-                type="text"
-                value={form.location}
-                onChange={handleChange}
-                placeholder="e.g. Remote, India, USA"
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              />
-
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => {
+                  setShowForm(false);
+                  setForm(initialForm);
+                }}
+                className="rounded-xl border border-slate-300 bg-white px-8 py-3 font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
             </div>
+          </form>
+        )}
+
+        {/* LOADING */}
+
+        {loading && (
+          <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm">
+            <p className="text-sm font-medium text-slate-500">
+              Loading your projects...
+            </p>
           </div>
+        )}
 
-          {/* =========================
-              SUBMIT
-          ========================== */}
+        {/* EMPTY */}
 
-          <div className="mt-10 flex flex-col-reverse gap-3 border-t border-slate-100 pt-8 sm:flex-row sm:justify-end">
+        {!loading && projects.length === 0 && !error && (
+          <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center shadow-sm">
+            <div className="mb-4 text-5xl">📁</div>
+
+            <h2 className="text-xl font-bold text-slate-900">
+              No Projects Yet
+            </h2>
+
+            <p className="mt-2 text-sm text-slate-500">
+              You have not posted any projects yet.
+            </p>
 
             <button
               type="button"
-              onClick={() => {
-                setForm(initialForm);
-                setError("");
-                setSuccess("");
-              }}
-              disabled={loading}
-              className="rounded-xl border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => setShowForm(true)}
+              className="mt-6 rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white hover:bg-blue-700"
             >
-              Clear
+              Post Your First Project
             </button>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="rounded-xl bg-blue-600 px-7 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {loading
-                ? "Posting Project..."
-                : "Post Project"}
-            </button>
-
           </div>
+        )}
 
-        </form>
+        {/* PROJECT LIST */}
+
+        {!loading && projects.length > 0 && (
+          <div className="grid gap-6 md:grid-cols-2">
+            {projects.map((project) => (
+              <div
+                key={project.id}
+                className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:shadow-md"
+              >
+                {/* HEADER */}
+
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <h2 className="text-xl font-bold text-slate-900">
+                      {project.title}
+                    </h2>
+
+                    {project.category && (
+                      <p className="mt-1 text-sm text-slate-500">
+                        {project.category}
+                      </p>
+                    )}
+                  </div>
+
+                  <span
+                    className={`shrink-0 rounded-full border px-3 py-1 text-xs font-semibold ${getStatusClasses(
+                      project.status
+                    )}`}
+                  >
+                    {formatStatus(project.status)}
+                  </span>
+                </div>
+
+                {/* DESCRIPTION */}
+
+                <p className="mt-5 line-clamp-3 text-sm leading-6 text-slate-600">
+                  {project.description}
+                </p>
+
+                {/* DETAILS */}
+
+                <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                  <div className="rounded-xl bg-slate-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Budget
+                    </p>
+
+                    <p className="mt-1 text-sm font-bold text-slate-900">
+                      {formatBudget(
+                        project.budget_min,
+                        project.budget_max,
+                        project.budget_type
+                      )}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-slate-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Experience
+                    </p>
+
+                    <p className="mt-1 text-sm font-bold text-slate-900">
+                      {formatExperience(project.experience_level)}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-slate-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Deadline
+                    </p>
+
+                    <p className="mt-1 text-sm font-bold text-slate-900">
+                      {formatDate(project.deadline)}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-slate-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                      Location
+                    </p>
+
+                    <p className="mt-1 truncate text-sm font-bold text-slate-900">
+                      {project.location || "Remote"}
+                    </p>
+                  </div>
+                </div>
+
+                {/* FOOTER */}
+
+                <div className="mt-6 flex items-center justify-between border-t border-slate-100 pt-5">
+                  <p className="text-xs text-slate-400">
+                    Project #{project.id}
+                  </p>
+
+                  <p className="text-xs text-slate-400">
+                    Created {formatDate(project.created_at)}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </main>
   );

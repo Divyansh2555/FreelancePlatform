@@ -134,7 +134,7 @@ export default function ClientHeader({
 
           {/* Notifications */}
           <Link
-            href="/client/notifications"
+            href="/client/Notifications"
             aria-label="Notifications"
             className="relative rounded-xl p-2.5 text-gray-600 transition hover:bg-gray-100"
           >
@@ -156,6 +156,8 @@ export default function ClientHeader({
               3
             </span>
           </Link>
+
+
 
           {/* Divider */}
           <div className="hidden h-8 w-px bg-gray-200 sm:block" />
@@ -225,7 +227,7 @@ export default function ClientHeader({
                 </Link>
 
                 <Link
-                  href="/client/settings"
+                  href="/client/Settings"
                   onClick={() => setProfileOpen(false)}
                   className="flex items-center gap-3 px-4 py-3 text-sm text-gray-700 hover:bg-gray-50"
                 >

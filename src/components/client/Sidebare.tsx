@@ -21,7 +21,7 @@ const workspaceItems = [
   },
   {
     name: "Find Freelancers",
-    href: "/client/freelancers",
+    href: "/client/Freelancers",
     icon: "👥",
   },
   {
@@ -44,11 +44,7 @@ const workspaceItems = [
     href: "/client/payments",
     icon: "💳",
   },
-  {
-    name: "Reviews",
-    href: "/client/reviews",
-    icon: "⭐",
-  },
+  
 ];
 
 const accountItems = [
@@ -59,12 +55,12 @@ const accountItems = [
   },
   {
     name: "Notifications",
-    href: "/client/notifications",
+    href: "/client/Notifications",
     icon: "🔔",
   },
   {
     name: "Settings",
-    href: "/client/settings",
+    href: "/client/Settings",
     icon: "⚙",
   },
 ];

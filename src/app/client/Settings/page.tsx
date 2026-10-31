@@ -1,9 +1,7 @@
+import Satting from "../../../components/client/Settings";
 
-export default function HireWebDesigners() {
-    return (
-        <main>
-            <p>Hire Web Designers</p>
-            <p>Hire Web Designers tool  </p>
-        </main>
-    );
+export default function SettingsPage() {
+  return(
+   <p> Hiii</p>
+  )
 }
