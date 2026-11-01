@@ -1,9 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+
+// =========================
+// PROJECT INTERFACE
+// =========================
 
 interface Project {
   id: number;
@@ -22,90 +26,179 @@ interface Project {
   updated_at: string;
 }
 
+// =========================
+// MAIN COMPONENT
+// =========================
+
 export default function HireWebDesigners() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    const fetchProjects = async () => {
-      try {
-        setLoading(true);
-        setError("");
+  // =========================
+  // FETCH LOGGED-IN USER PROJECTS
+  // =========================
 
-        const response = await fetch(
-          `${API_URL}/api/v1/projects/`,
-          {
-            method: "GET",
-            headers: {
-              "Content-Type": "application/json",
-            },
-          }
+  const fetchProjects = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError("");
+
+      // Get authentication token
+      const token = localStorage.getItem("access_token");
+
+      // Get logged-in user role
+      const role = localStorage
+        .getItem("role")
+        ?.trim()
+        .toLowerCase();
+
+      // Check authentication
+      if (!token) {
+        throw new Error(
+          "Login session not found. Please login again."
         );
+      }
 
-        if (!response.ok) {
-          throw new Error("Failed to fetch projects");
+      // Check client role
+      if (role !== "client") {
+        throw new Error(
+          "Only clients can view their projects."
+        );
+      }
+
+      // API REQUEST
+      const response = await fetch(
+        `${API_URL}/api/v1/projects/my`,
+        {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      // HANDLE API ERRORS
+      if (!response.ok) {
+        const errorData = await response
+          .json()
+          .catch(() => ({}));
+
+        if (response.status === 401) {
+          throw new Error(
+            "Session expired. Please login again."
+          );
         }
 
-        const data = await response.json();
+        if (response.status === 403) {
+          throw new Error(
+            "You are not authorized to view these projects."
+          );
+        }
 
-        setProjects(data);
-      } catch (err) {
-        console.error(err);
-        setError(
-          "Unable to load projects. Please try again."
+        throw new Error(
+          errorData.detail ||
+            `Failed to fetch projects. Status: ${response.status}`
         );
-      } finally {
-        setLoading(false);
       }
-    };
 
-    fetchProjects();
+      // GET RESPONSE DATA
+      const data = await response.json();
+
+      // SUPPORT ARRAY RESPONSE
+      const projectList = Array.isArray(data)
+        ? data
+        : Array.isArray(data.projects)
+        ? data.projects
+        : [];
+
+      // SET PROJECTS
+      setProjects(projectList);
+
+    } catch (err) {
+      console.error("PROJECT FETCH ERROR:", err);
+
+      setProjects([]);
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Unable to load projects. Please try again."
+      );
+
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
+  // =========================
+  // LOAD PROJECTS
+  // =========================
+
+  useEffect(() => {
+    fetchProjects();
+  }, [fetchProjects]);
+
+  // =========================
+  // FORMAT BUDGET
+  // =========================
+
   const formatBudget = (project: Project) => {
-    if (
-      project.budget_min == null &&
-      project.budget_max == null
-    ) {
+    const min = project.budget_min;
+    const max = project.budget_max;
+
+    if (min == null && max == null) {
       return "Budget not specified";
     }
 
-    if (
-      project.budget_min != null &&
-      project.budget_max != null
-    ) {
-      return `$${project.budget_min} - $${project.budget_max}`;
+    if (min != null && max != null) {
+      return `$${min} - $${max}`;
     }
 
-    if (project.budget_min != null) {
-      return `From $${project.budget_min}`;
+    if (min != null) {
+      return `From $${min}`;
     }
 
-    return `Up to $${project.budget_max}`;
+    return `Up to $${max}`;
   };
+
+  // =========================
+  // FORMAT DATE
+  // =========================
 
   const formatDate = (date: string | null) => {
     if (!date) {
       return "No deadline";
     }
 
-    return new Date(date).toLocaleDateString(
-      "en-US",
-      {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-      }
-    );
+    const parsedDate = new Date(date);
+
+    if (isNaN(parsedDate.getTime())) {
+      return "Invalid date";
+    }
+
+    return parsedDate.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
   };
+
+  // =========================
+  // UI
+  // =========================
 
   return (
     <main className="min-h-screen bg-slate-50">
-      {/* Hero Section */}
+
+      {/* HERO SECTION */}
+
       <section className="border-b border-slate-200 bg-white">
         <div className="mx-auto max-w-7xl px-6 py-16 lg:px-8">
+
           <div className="max-w-3xl">
+
             <span className="inline-flex rounded-full bg-blue-50 px-4 py-1.5 text-sm font-semibold text-blue-700">
               Find your next project
             </span>
@@ -118,61 +211,86 @@ export default function HireWebDesigners() {
               Discover web design projects posted by clients
               and find opportunities that match your skills.
             </p>
+
           </div>
         </div>
       </section>
 
-      {/* Projects Section */}
+      {/* PROJECTS SECTION */}
+
       <section className="mx-auto max-w-7xl px-6 py-12 lg:px-8">
-        {/* Header */}
+
+        {/* HEADER */}
+
         <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+
           <div>
+
             <h2 className="text-2xl font-bold text-slate-900">
-              Available Projects
+              My Projects
             </h2>
 
             <p className="mt-1 text-sm text-slate-500">
-              {projects.length} projects available
+              {projects.length} projects found
             </p>
+
           </div>
 
           <button
-            onClick={() => window.location.reload()}
-            className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
+            onClick={fetchProjects}
+            disabled={loading}
+            className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 disabled:opacity-50"
           >
-            Refresh
+            {loading ? "Loading..." : "Refresh"}
           </button>
+
         </div>
 
-        {/* Loading */}
+        {/* LOADING */}
+
         {loading && (
+
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+
             {[1, 2, 3, 4, 5, 6].map((item) => (
+
               <div
                 key={item}
                 className="animate-pulse rounded-2xl border border-slate-200 bg-white p-6"
               >
+
                 <div className="h-5 w-24 rounded bg-slate-200" />
 
                 <div className="mt-5 h-6 w-3/4 rounded bg-slate-200" />
 
                 <div className="mt-4 h-4 w-full rounded bg-slate-200" />
+
                 <div className="mt-2 h-4 w-5/6 rounded bg-slate-200" />
+
                 <div className="mt-2 h-4 w-2/3 rounded bg-slate-200" />
 
                 <div className="mt-6 h-10 w-full rounded bg-slate-200" />
+
               </div>
+
             ))}
+
           </div>
+
         )}
 
-        {/* Error */}
+        {/* ERROR */}
+
         {!loading && error && (
+
           <div className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center">
+
             <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-red-100">
+
               <span className="text-xl text-red-600">
                 !
               </span>
+
             </div>
 
             <h3 className="mt-4 text-lg font-semibold text-red-900">
@@ -184,57 +302,75 @@ export default function HireWebDesigners() {
             </p>
 
             <button
-              onClick={() => window.location.reload()}
+              onClick={fetchProjects}
               className="mt-5 rounded-lg bg-red-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-red-700"
             >
               Try Again
             </button>
+
           </div>
+
         )}
 
-        {/* Empty */}
+        {/* EMPTY PROJECTS */}
+
         {!loading &&
           !error &&
           projects.length === 0 && (
+
             <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-16 text-center">
+
               <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-slate-100">
+
                 <svg
                   className="h-7 w-7 text-slate-400"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
                 >
+
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     strokeWidth={1.8}
                     d="M9 13h6m-3-3v6m8-3a9 9 0 11-18 0 9 9 0 0118 0z"
                   />
+
                 </svg>
+
               </div>
 
               <h3 className="mt-4 text-lg font-semibold text-slate-900">
-                No projects available
+                No Projects Found
               </h3>
 
               <p className="mt-2 text-sm text-slate-500">
-                There are currently no open projects.
+                You haven't posted any projects yet.
               </p>
+
             </div>
+
           )}
 
-        {/* Projects */}
+        {/* PROJECT CARDS */}
+
         {!loading &&
           !error &&
           projects.length > 0 && (
+
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+
               {projects.map((project) => (
+
                 <article
                   key={project.id}
                   className="group flex flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition duration-200 hover:-translate-y-1 hover:border-blue-200 hover:shadow-lg"
                 >
-                  {/* Category + Status */}
+
+                  {/* CATEGORY + STATUS */}
+
                   <div className="flex items-center justify-between gap-3">
+
                     <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
                       {project.category || "Web Design"}
                     </span>
@@ -242,22 +378,29 @@ export default function HireWebDesigners() {
                     <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold capitalize text-emerald-700">
                       {project.status}
                     </span>
+
                   </div>
 
-                  {/* Title */}
+                  {/* TITLE */}
+
                   <h3 className="mt-5 line-clamp-2 text-xl font-bold text-slate-900 transition group-hover:text-blue-600">
                     {project.title}
                   </h3>
 
-                  {/* Description */}
+                  {/* DESCRIPTION */}
+
                   <p className="mt-3 line-clamp-3 text-sm leading-6 text-slate-600">
                     {project.description}
                   </p>
 
-                  {/* Project Information */}
+                  {/* PROJECT INFORMATION */}
+
                   <div className="mt-6 space-y-3 border-t border-slate-100 pt-5">
-                    {/* Budget */}
-                    <div className="flex items-center justify-between">
+
+                    {/* BUDGET */}
+
+                    <div className="flex items-center justify-between gap-3">
+
                       <span className="text-sm text-slate-500">
                         Budget
                       </span>
@@ -265,10 +408,13 @@ export default function HireWebDesigners() {
                       <span className="font-semibold text-slate-900">
                         {formatBudget(project)}
                       </span>
+
                     </div>
 
-                    {/* Budget Type */}
+                    {/* BUDGET TYPE */}
+
                     <div className="flex items-center justify-between">
+
                       <span className="text-sm text-slate-500">
                         Type
                       </span>
@@ -276,22 +422,27 @@ export default function HireWebDesigners() {
                       <span className="text-sm font-medium capitalize text-slate-700">
                         {project.budget_type}
                       </span>
+
                     </div>
 
-                    {/* Experience */}
+                    {/* EXPERIENCE */}
+
                     <div className="flex items-center justify-between">
+
                       <span className="text-sm text-slate-500">
                         Experience
                       </span>
 
                       <span className="text-sm font-medium capitalize text-slate-700">
-                        {project.experience_level ||
-                          "Not specified"}
+                        {project.experience_level || "Not specified"}
                       </span>
+
                     </div>
 
-                    {/* Deadline */}
+                    {/* DEADLINE */}
+
                     <div className="flex items-center justify-between">
+
                       <span className="text-sm text-slate-500">
                         Deadline
                       </span>
@@ -299,11 +450,15 @@ export default function HireWebDesigners() {
                       <span className="text-sm font-medium text-slate-700">
                         {formatDate(project.deadline)}
                       </span>
+
                     </div>
 
-                    {/* Location */}
+                    {/* LOCATION */}
+
                     {project.location && (
+
                       <div className="flex items-center justify-between">
+
                         <span className="text-sm text-slate-500">
                           Location
                         </span>
@@ -311,12 +466,17 @@ export default function HireWebDesigners() {
                         <span className="max-w-[180px] truncate text-sm font-medium text-slate-700">
                           {project.location}
                         </span>
+
                       </div>
+
                     )}
+
                   </div>
 
-                  {/* Button */}
+                  {/* VIEW PROJECT BUTTON */}
+
                   <div className="mt-6">
+
                     <button
                       onClick={() => {
                         console.log(
@@ -328,12 +488,19 @@ export default function HireWebDesigners() {
                     >
                       View Project
                     </button>
+
                   </div>
+
                 </article>
+
               ))}
+
             </div>
+
           )}
+
       </section>
+
     </main>
   );
 }

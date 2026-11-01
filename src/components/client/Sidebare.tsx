@@ -10,8 +10,8 @@ const workspaceItems = [
     icon: "⌂",
   },
   {
-    name: "Post a Project",
-    href: "/client/projects/create",
+    name: "Create Project",
+    href: "/client/create",
     icon: "＋",
   },
   {
