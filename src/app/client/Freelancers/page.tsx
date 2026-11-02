@@ -1,9 +1,9 @@
-import asd from "../../../components/client/freelancers";
+import Asd from "../../../components/client/freelancers";
 
 
 
 export default function Find_Freelancers() {
     return (
-        <asd />
+        <Asd />
     );
 }

@@ -14,13 +14,15 @@ export const endpoints = {
     profile: "/client/profile/",
   },
 
-  chat: {
-    users: "/chat/users",
-
-    conversation: "/chat/conversation",
+chat: {
+    users: "/api/v1/chat/users",
+    conversation: "/api/v1/chat/conversation",
 
     messages: (conversationId: number | string) =>
-      `/chat/${conversationId}/messages`,
+      `/api/v1/chat/${conversationId}/messages`,
+
+    websocket: (token: string) =>
+      `/api/v1/chat/ws/${encodeURIComponent(token)}`,
   },
 
   freelancer: {

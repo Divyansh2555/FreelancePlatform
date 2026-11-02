@@ -1,3 +1,7 @@
+// =========================================================
+// CHAT TYPES
+// =========================================================
+
 export interface User {
   id: number | string;
   name: string;
@@ -6,10 +10,18 @@ export interface User {
   avatar?: string | null;
 }
 
+// =========================================================
+// CONVERSATION
+// =========================================================
+
 export interface Conversation {
   id: number | string;
   [key: string]: unknown;
 }
+
+// =========================================================
+// MESSAGE
+// =========================================================
 
 export interface Message {
   id: number | string | null;
@@ -20,6 +32,10 @@ export interface Message {
   is_read: boolean;
   created_at: string;
 }
+
+// =========================================================
+// WEBSOCKET MESSAGE
+// =========================================================
 
 export interface WebSocketMessage {
   type?: string;
@@ -45,4 +61,26 @@ export interface WebSocketMessage {
   createdAt?: string;
 
   detail?: string;
+}
+
+// =========================================================
+// API ERROR
+// =========================================================
+
+export interface ApiError {
+  detail?: string;
+  message?: string;
+  error?: string;
+  errors?: unknown;
+}
+
+// =========================================================
+// JWT PAYLOAD
+// =========================================================
+
+export interface JwtPayload {
+  sub?: string | number;
+  exp?: number;
+  iat?: number;
+  [key: string]: unknown;
 }
