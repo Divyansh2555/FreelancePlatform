@@ -1,11 +1,11 @@
-import { apiFetch } from "../client";
-import { endpoints } from "../endpoints";
+import { apiFetch } from "../../client";
+import { endpoints } from "../../endpoints";
 
 import type {
   ClientProfile,
   CreateClientProfileData,
   UpdateClientProfileData,
-} from "../../../types/clientprofile";
+} from "../../../../types/client/clientprofile";
 
 /**
  * =========================================================

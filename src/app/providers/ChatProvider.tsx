@@ -6,7 +6,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { useChat as useChatHook } from "../../hooks/useChat";
+import { useChat as useChatHook } from "../../hooks/freelancer/useChat";
 
 type ChatContextType = ReturnType<typeof useChatHook>;
 

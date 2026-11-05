@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { freelancerApi } from "../../lib/api/services/freelancrerprofile";
-import type { FreelancerProfile } from "../../types/freelancerprofile";
+import { freelancerApi } from "../../lib/api/services/freelancer/freelancrerprofile";
+import type { FreelancerProfile } from "../../types/freelamcers/profile";
 
 type ProfileForm = {
   title: string;

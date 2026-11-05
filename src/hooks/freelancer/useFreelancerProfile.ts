@@ -3,28 +3,40 @@
 import {
   useCallback,
   useEffect,
-  useRef,
   useState,
 } from "react";
 
-import { freelancerApi } from "../lib/api/services/freelancrerprofile";
+import { freelancerApi } from "../../lib/api/services/freelancer/freelancrerprofile";
 
 import type {
   FreelancerProfile,
   UpdateFreelancerProfile,
-} from "../types/freelancerprofile";
+} from "../../types/freelamcers/profile";
 
 /* =========================================================
    CACHE CONFIG
 ========================================================= */
 
 const CACHE_PREFIX = "freelancer_profile";
-const CACHE_TIME = 5 * 60 * 1000;
+
+/*
+ * Cache valid for 24 hours.
+ */
+const CACHE_TIME = 24 * 60 * 60 * 1000;
 
 type CachedProfile = {
   data: FreelancerProfile;
   timestamp: number;
 };
+
+/*
+ * Global request protection.
+ * Shared across all hook instances.
+ */
+const profileRequests = new Map<
+  number,
+  Promise<FreelancerProfile | null>
+>();
 
 /* =========================================================
    CACHE KEY
@@ -211,9 +223,6 @@ function extractProfile(
 
 /* =========================================================
    GET CACHE
-
-   IMPORTANT:
-   This function NEVER calls API.
 ========================================================= */
 
 function getCachedProfile(
@@ -224,8 +233,9 @@ function getCachedProfile(
   }
 
   try {
-    const key = getCacheKey(userId);
-    const raw = localStorage.getItem(key);
+    const raw = localStorage.getItem(
+      getCacheKey(userId)
+    );
 
     if (!raw) {
       return null;
@@ -240,15 +250,24 @@ function getCachedProfile(
       !cached.data ||
       typeof cached.timestamp !== "number"
     ) {
-      localStorage.removeItem(key);
+      localStorage.removeItem(
+        getCacheKey(userId)
+      );
+
       return null;
     }
 
     const age =
       Date.now() - cached.timestamp;
 
-    if (age >= CACHE_TIME) {
-      localStorage.removeItem(key);
+    if (
+      age < 0 ||
+      age >= CACHE_TIME
+    ) {
+      localStorage.removeItem(
+        getCacheKey(userId)
+      );
+
       return null;
     }
 
@@ -271,11 +290,12 @@ function setCachedProfile(
     return;
   }
 
-  const userId = Number(
-    profile.user_id
-  );
+  const userId = Number(profile.user_id);
 
-  if (!Number.isFinite(userId) || userId <= 0) {
+  if (
+    !Number.isFinite(userId) ||
+    userId <= 0
+  ) {
     return;
   }
 
@@ -290,7 +310,7 @@ function setCachedProfile(
       JSON.stringify(cached)
     );
   } catch {
-    // Ignore localStorage errors.
+    // Ignore storage errors.
   }
 }
 
@@ -337,29 +357,8 @@ export function useFreelancerProfile() {
   const [message, setMessage] =
     useState("");
 
-  /*
-   * One API request at a time.
-   */
-  const requestRef =
-    useRef<Promise<FreelancerProfile | null> | null>(
-      null
-    );
-
-  /*
-   * Initial load only once.
-   */
-  const initializedRef =
-    useRef(false);
-
   /* =======================================================
      FETCH PROFILE
-
-     NORMAL:
-       cache -> UI
-       NO API
-
-     FORCE:
-       API -> UI -> cache
   ======================================================= */
 
   const fetchProfile = useCallback(
@@ -379,9 +378,12 @@ export function useFreelancerProfile() {
       if (!token) {
         setProfile(null);
         setLoading(false);
+        setRefreshing(false);
+
         setError(
           "Authentication required."
         );
+
         return null;
       }
 
@@ -391,21 +393,17 @@ export function useFreelancerProfile() {
       if (!userId) {
         setProfile(null);
         setLoading(false);
+        setRefreshing(false);
+
         setError(
           "User ID token mein nahi mila."
         );
+
         return null;
       }
 
       /*
-       * ====================================================
        * CACHE FIRST
-       *
-       * IMPORTANT:
-       * force=false hone par yahin return ho jayega.
-       *
-       * Iske baad API code execute HI nahi hoga.
-       * ====================================================
        */
 
       if (!force) {
@@ -424,20 +422,17 @@ export function useFreelancerProfile() {
 
           return cached;
         }
-
-        console.log(
-          "❌ FREELANCER PROFILE: CACHE MISS"
-        );
       }
 
       /*
-       * ====================================================
-       * DUPLICATE API REQUEST PROTECTION
-       * ====================================================
+       * GLOBAL DUPLICATE REQUEST PROTECTION
        */
 
-      if (requestRef.current) {
-        return requestRef.current;
+      const existingRequest =
+        profileRequests.get(userId);
+
+      if (existingRequest) {
+        return existingRequest;
       }
 
       if (background) {
@@ -449,88 +444,78 @@ export function useFreelancerProfile() {
       setError("");
 
       /*
-       * ====================================================
        * API REQUEST
-       *
-       * ONLY REACHED WHEN:
-       *
-       * 1. cache missing
-       * OR
-       * 2. force=true
-       * ====================================================
        */
 
-      const request =
-        (async (): Promise<FreelancerProfile | null> => {
-          try {
-            console.log(
-              "🌐 FREELANCER PROFILE: API GET"
+      const request = (async () => {
+        try {
+          console.log(
+            "🌐 FREELANCER PROFILE: API GET"
+          );
+
+          const response =
+            await freelancerApi.getProfiles();
+
+          const rawProfile =
+            extractProfile(response);
+
+          if (
+            !rawProfile ||
+            !rawProfile.id
+          ) {
+            throw new Error(
+              "Invalid freelancer profile response."
             );
-
-            const response =
-              await freelancerApi.getProfiles();
-
-            const rawProfile =
-              extractProfile(response);
-
-            if (
-              !rawProfile ||
-              !rawProfile.id
-            ) {
-              throw new Error(
-                "Invalid freelancer profile response."
-              );
-            }
-
-            const freshProfile =
-              normalizeProfile(
-                rawProfile
-              );
-
-            /*
-             * UI
-             */
-            setProfile(
-              freshProfile
-            );
-
-            /*
-             * CACHE
-             */
-            setCachedProfile(
-              freshProfile
-            );
-
-            console.log(
-              "💾 FREELANCER PROFILE: SAVED TO CACHE"
-            );
-
-            return freshProfile;
-          } catch (err) {
-            console.error(
-              "GET freelancer profile error:",
-              err
-            );
-
-            const errorMessage =
-              err instanceof Error
-                ? err.message
-                : "Profile load nahi ho saki.";
-
-            setError(
-              errorMessage
-            );
-
-            return null;
           }
-        })();
 
-      requestRef.current = request;
+          const freshProfile =
+            normalizeProfile(rawProfile);
+
+          /*
+           * SAVE CACHE
+           */
+
+          setCachedProfile(freshProfile);
+
+          /*
+           * UPDATE UI
+           */
+
+          setProfile(freshProfile);
+
+          console.log(
+            "💾 FREELANCER PROFILE: CACHE SAVED"
+          );
+
+          return freshProfile;
+        } catch (err) {
+          console.error(
+            "GET freelancer profile error:",
+            err
+          );
+
+          const errorMessage =
+            err instanceof Error
+              ? err.message
+              : "Profile load nahi ho saki.";
+
+          setError(errorMessage);
+
+          return null;
+        }
+      })();
+
+      profileRequests.set(userId, request);
 
       try {
         return await request;
       } finally {
-        requestRef.current = null;
+        if (
+          profileRequests.get(userId) === request
+        ) {
+          profileRequests.delete(userId);
+        }
+
         setLoading(false);
         setRefreshing(false);
       }
@@ -539,153 +524,131 @@ export function useFreelancerProfile() {
   );
 
   /* =======================================================
-     REFRESH
-
-     ONLY THIS FUNCTION BYPASSES CACHE.
+     MANUAL REFRESH
   ======================================================= */
 
-  const refreshProfile =
-    useCallback(async () => {
+  const refreshProfile = useCallback(
+    async () => {
       return fetchProfile({
         force: true,
         background: true,
       });
-    }, [fetchProfile]);
+    },
+    [fetchProfile]
+  );
 
   /* =======================================================
      UPDATE PROFILE
   ======================================================= */
 
-  const updateProfile =
-    useCallback(
-      async (
-        payload: UpdateFreelancerProfile
-      ): Promise<FreelancerProfile> => {
-        if (!profile) {
-          throw new Error(
-            "Profile available nahi hai."
+  const updateProfile = useCallback(
+    async (
+      payload: UpdateFreelancerProfile
+    ): Promise<FreelancerProfile> => {
+      if (!profile) {
+        throw new Error(
+          "Profile available nahi hai."
+        );
+      }
+
+      try {
+        setSaving(true);
+        setError("");
+        setMessage("");
+
+        const formData = new FormData();
+
+        formData.append(
+          "title",
+          payload.title ?? ""
+        );
+
+        formData.append(
+          "bio",
+          payload.bio ?? ""
+        );
+
+        formData.append(
+          "skills",
+          payload.skills ?? ""
+        );
+
+        formData.append(
+          "experience",
+          String(payload.experience ?? 0)
+        );
+
+        if (
+          payload.hourly_rate !== null &&
+          payload.hourly_rate !== undefined
+        ) {
+          formData.append(
+            "hourly_rate",
+            String(payload.hourly_rate)
           );
         }
 
-        try {
-          setSaving(true);
-          setError("");
-          setMessage("");
+        formData.append(
+          "location",
+          payload.location ?? ""
+        );
 
-          const formData =
-            new FormData();
-
+        if (payload.profile_image) {
           formData.append(
-            "title",
-            payload.title ?? ""
+            "profile_image",
+            payload.profile_image,
+            payload.profile_image.name
           );
-
-          formData.append(
-            "bio",
-            payload.bio ?? ""
-          );
-
-          formData.append(
-            "skills",
-            payload.skills ?? ""
-          );
-
-          formData.append(
-            "experience",
-            String(
-              payload.experience ?? 0
-            )
-          );
-
-          if (
-            payload.hourly_rate !== null &&
-            payload.hourly_rate !== undefined
-          ) {
-            formData.append(
-              "hourly_rate",
-              String(
-                payload.hourly_rate
-              )
-            );
-          }
-
-          formData.append(
-            "location",
-            payload.location ?? ""
-          );
-
-          if (
-            payload.profile_image
-          ) {
-            formData.append(
-              "profile_image",
-              payload.profile_image,
-              payload.profile_image.name
-            );
-          }
-
-          const response =
-            await freelancerApi.updateProfile(
-              profile.id,
-              formData
-            );
-
-          const rawProfile =
-            extractProfile(response);
-
-          const updatedProfile =
-            normalizeProfile(
-              rawProfile
-            );
-
-          /*
-           * UI immediately update.
-           */
-          setProfile(
-            updatedProfile
-          );
-
-          /*
-           * CACHE immediately update.
-           */
-          setCachedProfile(
-            updatedProfile
-          );
-
-          setMessage(
-            "Profile updated successfully."
-          );
-
-          return updatedProfile;
-        } catch (err) {
-          console.error(
-            "UPDATE freelancer profile error:",
-            err
-          );
-
-          const errorMessage =
-            err instanceof Error
-              ? err.message
-              : "Profile update nahi ho saki.";
-
-          setError(
-            errorMessage
-          );
-
-          throw err;
-        } finally {
-          setSaving(false);
         }
-      },
-      [profile]
-    );
+
+        const response =
+          await freelancerApi.updateProfile(
+            profile.id,
+            formData
+          );
+
+        const rawProfile =
+          extractProfile(response);
+
+        const updatedProfile =
+          normalizeProfile(rawProfile);
+
+        setProfile(updatedProfile);
+
+        setCachedProfile(updatedProfile);
+
+        setMessage(
+          "Profile updated successfully."
+        );
+
+        return updatedProfile;
+      } catch (err) {
+        console.error(
+          "UPDATE freelancer profile error:",
+          err
+        );
+
+        const errorMessage =
+          err instanceof Error
+            ? err.message
+            : "Profile update nahi ho saki.";
+
+        setError(errorMessage);
+
+        throw err;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [profile]
+  );
 
   /* =======================================================
      DELETE PROFILE
   ======================================================= */
 
-  const deleteProfile =
-    useCallback(async () => {
+  const deleteProfile = useCallback(
+    async () => {
       if (!profile) {
         throw new Error(
           "Profile available nahi hai."
@@ -724,58 +687,54 @@ export function useFreelancerProfile() {
             ? err.message
             : "Profile delete nahi ho saki.";
 
-        setError(
-          errorMessage
-        );
+        setError(errorMessage);
 
         throw err;
       }
-    }, [profile]);
+    },
+    [profile]
+  );
 
   /* =======================================================
      CLEAR ERROR
   ======================================================= */
 
-  const clearError =
-    useCallback(() => {
-      setError("");
-    }, []);
+  const clearError = useCallback(() => {
+    setError("");
+  }, []);
 
   /* =======================================================
      CLEAR MESSAGE
   ======================================================= */
 
-  const clearMessage =
-    useCallback(() => {
-      setMessage("");
-    }, []);
+  const clearMessage = useCallback(() => {
+    setMessage("");
+  }, []);
 
   /* =======================================================
      CLEAR CACHE
   ======================================================= */
 
-  const clearCache =
-    useCallback(() => {
-      if (!profile?.user_id) {
-        return;
-      }
+  const clearCache = useCallback(() => {
+    const token = getAccessToken();
 
-      removeCachedProfile(
-        Number(profile.user_id)
-      );
-    }, [profile]);
+    if (!token) {
+      return;
+    }
+
+    const userId =
+      getUserIdFromToken(token);
+
+    if (userId) {
+      removeCachedProfile(userId);
+    }
+  }, []);
 
   /* =======================================================
      INITIAL LOAD
   ======================================================= */
 
   useEffect(() => {
-    if (initializedRef.current) {
-      return;
-    }
-
-    initializedRef.current = true;
-
     void fetchProfile();
   }, [fetchProfile]);
 

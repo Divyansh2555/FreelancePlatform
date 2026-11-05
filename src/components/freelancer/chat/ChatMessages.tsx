@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 
-import type { Message } from "../../../types/chat";
+import type { Message } from "../../../types/freelamcers/chat";
 
 import { formatTime } from "../../../lib/utils/chat";
 

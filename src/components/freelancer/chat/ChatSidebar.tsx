@@ -1,6 +1,6 @@
 "use client";
 
-import type { User } from "../../../types/chat";
+import type { User } from "../../../types/freelamcers/chat";
 import { getInitial } from "../../../lib/utils/chat";
 
 interface Props {

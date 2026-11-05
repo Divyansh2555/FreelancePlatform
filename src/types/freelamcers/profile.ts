@@ -1,7 +1,7 @@
-// types/freelancerprofile.ts
+// types/freelancer.ts
 
 // =========================================================
-// FREELANCER PROFILE
+// PROFILE
 // =========================================================
 
 export type FreelancerProfile = {
@@ -21,10 +21,40 @@ export type FreelancerProfile = {
 
 
 // =========================================================
-// PROFILE FORM
+// CREATE PROFILE
 // =========================================================
 
-export type ProfileForm = {
+export type CreateFreelancerProfile = {
+  title: string;
+  bio?: string | null;
+  skills?: string | null;
+  experience: number;
+  hourly_rate?: number | null;
+  location?: string | null;
+  profile_image?: File | null;
+};
+
+
+// =========================================================
+// UPDATE PROFILE
+// =========================================================
+
+export type UpdateFreelancerProfile = {
+  title: string;
+  bio?: string | null;
+  skills?: string | null;
+  experience: number;
+  hourly_rate?: number | null;
+  location?: string | null;
+  profile_image?: File | null;
+};
+
+
+// =========================================================
+// FORM STATE
+// =========================================================
+
+export type FreelancerProfileForm = {
   title: string;
   bio: string;
   skills: string;
@@ -35,15 +65,14 @@ export type ProfileForm = {
 
 
 // =========================================================
-// API RESPONSE
+// API RESPONSES
 // =========================================================
 
-export type ApiResponse<T> = {
-  data?: T;
-  results?: T;
-  detail?: string;
-  message?: string;
-};
+export type FreelancerProfileResponse =
+  FreelancerProfile;
+
+export type FreelancerProfilesResponse =
+  FreelancerProfile[];
 
 
 // =========================================================
@@ -51,7 +80,6 @@ export type ApiResponse<T> = {
 // =========================================================
 
 export type ApiError = {
-  message?: string;
   detail?: string;
 };
 
@@ -64,14 +92,3 @@ export type ProfileImage = {
   file: File | null;
   preview: string | null;
 };
-
-
-// =========================================================
-// API RESPONSE TYPES
-// =========================================================
-
-export type FreelancerProfileResponse =
-  ApiResponse<FreelancerProfile>;
-
-export type FreelancerProfilesResponse =
-  ApiResponse<FreelancerProfile[]>;

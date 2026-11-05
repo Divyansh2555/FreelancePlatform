@@ -13,7 +13,7 @@ import type {
     Message,
     ChatCache,
     WebSocketMessage,
-} from "../types/chat";
+} from "../../types/freelamcers/chat";
 
 import {
     getUsers,
@@ -21,13 +21,13 @@ import {
     getMessages,
     createChatSocket,
     sendSocketMessage,
-} from "../lib/api/services/chat";
+} from "../../lib/api/services/freelancer/chat";
 
 import {
     getToken,
     getCurrentUserId,
     mergeMessages,
-} from "../lib/utils/chat";
+} from "../../lib/utils/chat";
 
 // ===================================================
 // GLOBAL USERS CACHE

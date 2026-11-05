@@ -1,4 +1,4 @@
-import type { Message } from "../../types/chat";
+import type { Message } from "../../types/freelamcers/chat";
 
 export function normalizeMessage(value: unknown): Message | null {
   if (typeof value !== "object" || value === null) {

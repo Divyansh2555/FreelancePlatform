@@ -10,12 +10,12 @@ import {
 import {
   getClientProfile,
   updateClientProfile,
-} from "../lib/api/services/clientProfile";
+} from "../../lib/api/services/client/clientProfile";
 
 import type {
   ClientProfile,
   UpdateClientProfileData,
-} from "../types/clientprofile";
+} from "../../types/client/clientprofile";
 
 /* =========================================================
    CACHE

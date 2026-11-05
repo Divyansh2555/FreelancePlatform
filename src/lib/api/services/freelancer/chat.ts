@@ -3,11 +3,11 @@ import type {
   Conversation,
   Message,
   WebSocketMessage,
-} from "../../../types/chat";
+} from "../../../../types/freelamcers/chat";
 
 import {
   normalizeMessage,
-} from "../../utils/chat";
+} from "../../../utils/chat";
 
 // =====================================================
 // API CONFIG

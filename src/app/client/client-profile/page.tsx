@@ -8,8 +8,8 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 
-import { useClientProfile } from "../../../hooks/useClientProfile";
-import type { UpdateClientProfileData } from "../../../types/clientprofile";
+import { useClientProfile } from "../../../hooks/client/useClientProfile";
+import type { UpdateClientProfileData } from "../../../types/client/clientprofile";
 
 export default function ClientProfilePage() {
   const router = useRouter();

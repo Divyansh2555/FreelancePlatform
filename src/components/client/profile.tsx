@@ -7,7 +7,7 @@ import {
   useState,
 } from "react";
 
-import { useClientProfile } from "../../hooks/useClientProfile";
+import { useClientProfile } from "../../hooks/client/useClientProfile";
 
 export default function ClientProfilePage() {
   const {

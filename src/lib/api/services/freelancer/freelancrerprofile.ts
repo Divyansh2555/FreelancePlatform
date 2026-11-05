@@ -1,5 +1,5 @@
-import { apiFetch } from "../client";
-import { endpoints } from "../endpoints";
+import { apiFetch } from "../../client";
+import { endpoints } from "../../endpoints";
 
 export const freelancerApi = {
   // GET ALL PROFILES

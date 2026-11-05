@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClientProfile } from "../../../../lib/api/services/clientProfile";
+import { createClientProfile } from "../../../../lib/api/services/client/clientProfile";
 
 type ClientProfileForm = {
   company_name: string;
