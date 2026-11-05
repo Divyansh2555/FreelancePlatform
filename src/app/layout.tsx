@@ -1,5 +1,5 @@
-
 import "./globals.css";
+import { ChatProvider } from "./providers/ChatProvider";
 
 export default function RootLayout({
   children,
@@ -9,7 +9,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="min-h-screen">
-        {children}
+        <ChatProvider>
+          {children}
+        </ChatProvider>
       </body>
     </html>
   );

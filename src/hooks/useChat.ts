@@ -7,435 +7,612 @@ import {
     useState,
 } from "react";
 
-import {
-    searchUsers,
-    createConversation,
-    getMessages,
-} from "../lib/api/services/chat";
-
-import { endpoints } from "../lib/api/endpoints";
-
 import type {
     User,
     Conversation,
     Message,
+    ChatCache,
     WebSocketMessage,
 } from "../types/chat";
 
-// ========================================
-// WEBSOCKET URL
-// ========================================
+import {
+    getUsers,
+    getConversation,
+    getMessages,
+    createChatSocket,
+    sendSocketMessage,
+} from "../lib/api/services/chat";
 
-const WS_BASE_URL =
-    process.env.NEXT_PUBLIC_WS_BASE_URL ||
-    process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/^http/, "ws");
+import {
+    getToken,
+    getCurrentUserId,
+    mergeMessages,
+} from "../lib/utils/chat";
 
-// ========================================
-// RETURN TYPE
-// ========================================
+// ===================================================
+// GLOBAL USERS CACHE
+// Component remount hone par bhi cache available rahega
+// ===================================================
 
-interface UseChatReturn {
-    users: User[];
-    messages: Message[];
-    conversation: Conversation | null;
+const usersCache = new Map<
+    string,
+    {
+        data: User[];
+        time: number;
+    }
+>();
 
-    loading: boolean;
-    searching: boolean;
-    connected: boolean;
+const USERS_CACHE_TIME = 30 * 1000;
 
-    error: string | null;
+// ===================================================
+// HOOK
+// ===================================================
 
-    search: (value: string) => Promise<void>;
-    openChat: (user: User) => Promise<void>;
-    sendMessage: (message: string) => void;
-    disconnect: () => void;
-}
-
-// ========================================
-// MAIN HOOK
-// ========================================
-
-export function useChat(): UseChatReturn {
+export function useChat() {
     const [users, setUsers] = useState<User[]>([]);
-    const [messages, setMessages] = useState<Message[]>([]);
+    const [search, setSearch] = useState("");
+
+    const [selectedUser, setSelectedUser] =
+        useState<User | null>(null);
 
     const [conversation, setConversation] =
         useState<Conversation | null>(null);
 
-    const [loading, setLoading] = useState(false);
-    const [searching, setSearching] = useState(false);
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [message, setMessage] = useState("");
+
     const [connected, setConnected] = useState(false);
+    const [loading, setLoading] = useState(false);
+    const [usersLoading, setUsersLoading] = useState(false);
 
-    const [error, setError] = useState<string | null>(null);
+    const currentUserId = getCurrentUserId();
 
-    const wsRef = useRef<WebSocket | null>(null);
+    // ===================================================
+    // REFS
+    // ===================================================
+
+    const socketRef = useRef<WebSocket | null>(null);
+
+    const cacheRef = useRef<Map<string, ChatCache>>(
+        new Map()
+    );
+
+    const openingRef = useRef<string | null>(null);
+
+    const activeUserRef = useRef<string | null>(null);
+
+    const conversationRef = useRef<Conversation | null>(null);
+
+    const requestIdRef = useRef(0);
+
+    const searchIdRef = useRef(0);
+
+    const messageRef = useRef("");
+
+    const mountedRef = useRef(false);
 
     const reconnectTimerRef =
         useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const activeConversationRef =
-        useRef<Conversation | null>(null);
+    // ===================================================
+    // MESSAGE SYNC
+    // ===================================================
 
-    const reconnectAttemptsRef = useRef(0);
+    useEffect(() => {
+        messageRef.current = message;
+    }, [message]);
 
-    const shouldReconnectRef = useRef(true);
+    // ===================================================
+    // SEARCH USERS
+    // ===================================================
 
-    const searchRequestRef = useRef(0);
+    useEffect(() => {
+        const token = getToken();
 
-    const connectRef = useRef<() => void>(() => { });
+        if (!token) return;
 
-    // ========================================
-    // GET TOKEN
-    // ========================================
+        let cancelled = false;
 
-    const getToken = useCallback((): string | null => {
-        if (typeof window === "undefined") {
-            return null;
-        }
+        const controller = new AbortController();
 
-        return localStorage.getItem("access_token");
-    }, []);
+        const cacheKey = search.trim().toLowerCase();
 
-    // ========================================
-    // NORMALIZE MESSAGE
-    // ========================================
+        const timer = setTimeout(async () => {
+            const requestId = ++searchIdRef.current;
 
-    const normalizeMessage = useCallback(
-        (data: WebSocketMessage): Message | null => {
-            const messageText = data.message ?? data.content;
+            // Check cache
+            const cached = usersCache.get(cacheKey);
 
-            if (!messageText) {
-                return null;
+            if (
+                cached &&
+                Date.now() - cached.time < USERS_CACHE_TIME
+            ) {
+                setUsers(cached.data);
+                setUsersLoading(false);
+                return;
             }
 
-            return {
-                id: data.message_id ?? data.id ?? null,
+            try {
+                setUsersLoading(true);
 
-                conversation_id:
-                    data.conversation_id ??
-                    data.conversationId ??
-                    activeConversationRef.current?.id ??
-                    null,
+                const data = await getUsers(
+                    token,
+                    search,
+                    controller.signal
+                );
 
-                sender_id: data.sender_id ?? data.senderId ?? null,
+                if (
+                    cancelled ||
+                    controller.signal.aborted ||
+                    requestId !== searchIdRef.current
+                ) {
+                    return;
+                }
 
-                receiver_id: data.receiver_id ?? data.receiverId ?? null,
+                setUsers(data);
 
-                message: messageText,
+                usersCache.set(cacheKey, {
+                    data,
+                    time: Date.now(),
+                });
+            } catch (error) {
+                if (!controller.signal.aborted) {
+                    console.error("Users error:", error);
+                }
+            } finally {
+                if (
+                    !cancelled &&
+                    requestId === searchIdRef.current
+                ) {
+                    setUsersLoading(false);
+                }
+            }
+        }, 300);
 
-                is_read: data.is_read ?? false,
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+            controller.abort();
+        };
+    }, [search]);
 
-                created_at:
-                    data.created_at ??
-                    data.createdAt ??
-                    new Date().toISOString(),
-            };
+    // ===================================================
+    // CACHE UPDATE
+    // ===================================================
+
+    const updateCache = useCallback(
+        (userId: string, newMessages: Message[]) => {
+            const cached = cacheRef.current.get(userId);
+
+            if (!cached) return;
+
+            cacheRef.current.set(userId, {
+                ...cached,
+                messages: mergeMessages(
+                    cached.messages,
+                    newMessages
+                ),
+            });
         },
         []
     );
 
-    // ========================================
-    // DISCONNECT WEBSOCKET
-    // ========================================
-
-    const disconnect = useCallback(() => {
-        shouldReconnectRef.current = false;
-
-        if (reconnectTimerRef.current) {
-            clearTimeout(reconnectTimerRef.current);
-            reconnectTimerRef.current = null;
-        }
-
-        const ws = wsRef.current;
-
-        wsRef.current = null;
-
-        if (ws) {
-            ws.close();
-        }
-
-        setConnected(false);
-    }, []);
-
-    // ========================================
-    // CONNECT WEBSOCKET
-    // ========================================
-
-    const connectWebSocket = useCallback(() => {
-        const token = getToken();
-
-        if (!token || !WS_BASE_URL) {
-            setError("WebSocket URL or authentication token missing.");
-            return;
-        }
-
-        if (
-            wsRef.current &&
-            (
-                wsRef.current.readyState === WebSocket.OPEN ||
-                wsRef.current.readyState === WebSocket.CONNECTING
-            )
-        ) {
-            return;
-        }
-
-        const baseUrl = WS_BASE_URL.replace(/\/+$/, "");
-
-        const endpoint = endpoints.chat.websocket(token);
-
-        const cleanEndpoint = endpoint.startsWith("/")
-            ? endpoint
-            : `/${endpoint}`;
-
-        const wsUrl = `${baseUrl}${cleanEndpoint}`;
-
-        console.log("[CHAT] WebSocket URL:", wsUrl);
-
-        const ws = new WebSocket(wsUrl);
-
-        wsRef.current = ws;
-
-        ws.onopen = () => {
-            if (wsRef.current !== ws) return;
-
-            console.log("[CHAT] WebSocket connected");
-
-            setConnected(true);
-            setError(null);
-
-            reconnectAttemptsRef.current = 0;
-        };
-
-        ws.onmessage = (event: MessageEvent) => {
-            if (wsRef.current !== ws) return;
-
-            try {
-                const data = JSON.parse(
-                    event.data
-                ) as WebSocketMessage;
-
-                const normalized = normalizeMessage(data);
-
-                if (!normalized) return;
-
-                setMessages((previous) => {
-                    const exists = previous.some(
-                        (item) =>
-                            item.id !== null &&
-                            item.id === normalized.id
-                    );
-
-                    if (exists) {
-                        return previous;
-                    }
-
-                    return [...previous, normalized];
-                });
-            } catch (err) {
-                console.error("[CHAT] WebSocket message error:", err);
-            }
-        };
-
-        ws.onerror = () => {
-            if (wsRef.current !== ws) return;
-
-            setError("WebSocket connection error.");
-        };
-
-        ws.onclose = () => {
-            if (wsRef.current !== ws) return;
-
-            wsRef.current = null;
-
-            setConnected(false);
-
-            if (
-                shouldReconnectRef.current &&
-                reconnectAttemptsRef.current < 5
-            ) {
-                reconnectAttemptsRef.current++;
-
-                reconnectTimerRef.current = setTimeout(() => {
-                    connectRef.current();
-                }, 2000);
-            }
-        };
-    }, [getToken, normalizeMessage]);
-
-    connectRef.current = connectWebSocket;
-
-    // ========================================
-    // SEARCH ALL USERS
-    // ========================================
-
-    const search = useCallback(async (value: string) => {
-        const requestId = ++searchRequestRef.current;
-
-        try {
-            setSearching(true);
-            setError(null);
-
-            // Empty search par bhi all users API call hogi.
-            const result = await searchUsers(value);
-
-            // Ignore old requests.
-            if (requestId !== searchRequestRef.current) {
-                return;
-            }
-
-            console.log("[CHAT] Users loaded:", result);
-
-            setUsers(result);
-        } catch (err) {
-            if (requestId !== searchRequestRef.current) {
-                return;
-            }
-
-            console.error("[CHAT] User search error:", err);
-
-            setError(
-                err instanceof Error
-                    ? err.message
-                    : "User search failed."
-            );
-
-            setUsers([]);
-        } finally {
-            if (requestId === searchRequestRef.current) {
-                setSearching(false);
-            }
-        }
-    }, []);
-
-    // ========================================
-    // OPEN CHAT
-    // ========================================
-
-    const openChat = useCallback(
-        async (user: User) => {
-            try {
-                setLoading(true);
-                setError(null);
-
-                disconnect();
-
-                setMessages([]);
-                setConversation(null);
-
-                activeConversationRef.current = null;
-
-                console.log("[CHAT] Opening user:", user.id);
-
-                // Create conversation
-                const conversationData = await createConversation(
-                    user.id
-                );
-
-                setConversation(conversationData);
-
-                activeConversationRef.current = conversationData;
-
-                // Load old messages
-                const oldMessages = await getMessages(
-                    conversationData.id
-                );
-
-                setMessages(oldMessages);
-
-                // Connect WebSocket
-                shouldReconnectRef.current = true;
-
-                reconnectAttemptsRef.current = 0;
-
-                connectRef.current();
-            } catch (err) {
-                console.error("[CHAT] Open chat error:", err);
-
-                setError(
-                    err instanceof Error
-                        ? err.message
-                        : "Unable to open chat."
-                );
-            } finally {
-                setLoading(false);
-            }
-        },
-        [disconnect]
-    );
-
-    // ========================================
-    // SEND MESSAGE
-    // ========================================
-
-    const sendMessage = useCallback((message: string) => {
-        const text = message.trim();
-
-        if (!text) return;
-
-        const ws = wsRef.current;
-
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-            setError("WebSocket is not connected.");
-            return;
-        }
-
-        const activeConversation =
-            activeConversationRef.current;
-
-        if (!activeConversation) {
-            setError("Please open a conversation first.");
-            return;
-        }
-
-        ws.send(
-            JSON.stringify({
-                type: "message",
-                conversation_id: activeConversation.id,
-                message: text,
-            })
-        );
-    }, []);
-
-    // ========================================
-    // CLEANUP
-    // ========================================
+    // ===================================================
+    // WEBSOCKET
+    // ===================================================
 
     useEffect(() => {
+        mountedRef.current = true;
+
+        let stopped = false;
+        let attempts = 0;
+
+        let connectionTimer: ReturnType<
+            typeof setTimeout
+        > | null = null;
+
+        const connect = () => {
+            if (stopped || !mountedRef.current) return;
+
+            const token = getToken();
+
+            if (!token) return;
+
+            const existing = socketRef.current;
+
+            if (
+                existing &&
+                (
+                    existing.readyState === WebSocket.OPEN ||
+                    existing.readyState === WebSocket.CONNECTING
+                )
+            ) {
+                return;
+            }
+
+            const socket = createChatSocket(
+                token,
+
+                (data: WebSocketMessage) => {
+                    if (stopped || !mountedRef.current) return;
+
+                    // -------------------------------------------
+                    // NEW MESSAGE
+                    // -------------------------------------------
+
+                    if (data.type === "message") {
+                        const newMessage: Message = {
+                            id: data.message_id ?? data.id ?? null,
+
+                            conversation_id:
+                                data.conversation_id ??
+                                data.conversationId ??
+                                null,
+
+                            sender_id:
+                                data.sender_id ??
+                                data.senderId ??
+                                null,
+
+                            receiver_id:
+                                data.receiver_id ??
+                                data.receiverId ??
+                                null,
+
+                            message:
+                                data.message ??
+                                data.content ??
+                                "",
+
+                            is_read: data.is_read ?? false,
+
+                            created_at:
+                                data.created_at ??
+                                data.createdAt ??
+                                new Date().toISOString(),
+                        };
+
+                        const active = conversationRef.current;
+
+                        if (
+                            !active ||
+                            Number(active.id) !==
+                            Number(newMessage.conversation_id)
+                        ) {
+                            return;
+                        }
+
+                        setMessages((previous) => {
+                            const merged = mergeMessages(
+                                previous,
+                                [newMessage]
+                            );
+
+                            const userId = activeUserRef.current;
+
+                            if (userId) {
+                                updateCache(userId, [newMessage]);
+                            }
+
+                            return merged;
+                        });
+                    }
+
+                    // -------------------------------------------
+                    // MESSAGE READ
+                    // -------------------------------------------
+
+                    if (
+                        data.type === "message_read" ||
+                        data.type === "read"
+                    ) {
+                        const id = data.message_id ?? data.id;
+
+                        if (id == null) return;
+
+                        setMessages((previous) => {
+                            const updated = previous.map((item) =>
+                                Number(item.id) === Number(id)
+                                    ? { ...item, is_read: true }
+                                    : item
+                            );
+
+                            const userId = activeUserRef.current;
+
+                            const cached = userId
+                                ? cacheRef.current.get(userId)
+                                : null;
+
+                            if (userId && cached) {
+                                cacheRef.current.set(userId, {
+                                    ...cached,
+                                    messages: updated,
+                                });
+                            }
+
+                            return updated;
+                        });
+                    }
+                },
+
+                (status) => {
+                    if (stopped || !mountedRef.current) return;
+
+                    setConnected(status);
+
+                    if (status) {
+                        attempts = 0;
+                        return;
+                    }
+
+                    // Reconnect only after connection closes
+                    if (reconnectTimerRef.current) return;
+
+                    attempts++;
+
+                    const delay = Math.min(
+                        1000 * 2 ** (attempts - 1),
+                        10000
+                    );
+
+                    reconnectTimerRef.current = setTimeout(() => {
+                        reconnectTimerRef.current = null;
+                        connect();
+                    }, delay);
+                }
+            );
+
+            socketRef.current = socket;
+        };
+
+        // StrictMode first mount cleanup hone par
+        // connection start nahi hoga.
+        connectionTimer = setTimeout(connect, 100);
+
         return () => {
-            shouldReconnectRef.current = false;
+            stopped = true;
+            mountedRef.current = false;
+
+            if (connectionTimer) {
+                clearTimeout(connectionTimer);
+            }
 
             if (reconnectTimerRef.current) {
                 clearTimeout(reconnectTimerRef.current);
+                reconnectTimerRef.current = null;
             }
 
-            const ws = wsRef.current;
+            const socket = socketRef.current;
 
-            wsRef.current = null;
+            socketRef.current = null;
 
-            if (ws) {
-                ws.close();
+            if (socket) {
+                socket.onopen = null;
+                socket.onmessage = null;
+                socket.onerror = null;
+                socket.onclose = null;
+
+                if (
+                    socket.readyState === WebSocket.OPEN ||
+                    socket.readyState === WebSocket.CONNECTING
+                ) {
+                    socket.close();
+                }
             }
+
+            setConnected(false);
         };
+    }, [updateCache]);
+
+    // ===================================================
+    // OPEN CHAT
+    // ===================================================
+
+    const openChat = useCallback(
+        async (user: User) => {
+            const userId = String(user.id);
+
+            // Same user ki request already running hai
+            if (openingRef.current === userId) return;
+
+            // Already active chat ko dobara open mat karo
+            if (
+                activeUserRef.current === userId &&
+                conversationRef.current
+            ) {
+                return;
+            }
+
+            const token = getToken();
+
+            if (!token) {
+                alert("JWT token nahi mila");
+                return;
+            }
+
+            const requestId = ++requestIdRef.current;
+
+            openingRef.current = userId;
+            activeUserRef.current = userId;
+
+            setSelectedUser(user);
+            setMessages([]);
+            setMessage("");
+            setConversation(null);
+
+            conversationRef.current = null;
+
+            setLoading(true);
+
+            try {
+                // -------------------------------------------
+                // CHECK CHAT CACHE
+                // -------------------------------------------
+
+                const cached = cacheRef.current.get(userId);
+
+                if (cached) {
+                    if (requestId !== requestIdRef.current) return;
+
+                    setConversation(cached.conversation);
+
+                    conversationRef.current = cached.conversation;
+
+                    setMessages(cached.messages);
+
+                    return;
+                }
+
+                // -------------------------------------------
+                // GET CONVERSATION
+                // -------------------------------------------
+
+                const conversationData = await getConversation(
+                    token,
+                    user.id
+                );
+
+                if (requestId !== requestIdRef.current) return;
+
+                setConversation(conversationData);
+
+                conversationRef.current = conversationData;
+
+                // -------------------------------------------
+                // GET MESSAGES
+                // -------------------------------------------
+
+                const oldMessages = await getMessages(
+                    token,
+                    conversationData.id
+                );
+
+                if (requestId !== requestIdRef.current) return;
+
+                setMessages((current) => {
+                    const merged = mergeMessages(
+                        oldMessages,
+                        current
+                    );
+
+                    cacheRef.current.set(userId, {
+                        conversation: conversationData,
+                        messages: merged,
+                    });
+
+                    return merged;
+                });
+            } catch (error) {
+                if (requestId !== requestIdRef.current) return;
+
+                console.error("Open chat error:", error);
+
+                setSelectedUser(null);
+                setConversation(null);
+                setMessages([]);
+
+                conversationRef.current = null;
+                activeUserRef.current = null;
+
+                alert(
+                    error instanceof Error
+                        ? error.message
+                        : "Chat open nahi hui"
+                );
+            } finally {
+                if (requestId === requestIdRef.current) {
+                    setLoading(false);
+
+                    if (openingRef.current === userId) {
+                        openingRef.current = null;
+                    }
+                }
+            }
+        },
+        []
+    );
+
+    // ===================================================
+    // SEND MESSAGE
+    // ===================================================
+
+    const sendMessage = useCallback(() => {
+        const text = messageRef.current.trim();
+
+        if (!text) return;
+
+        if (!selectedUser || !conversation) {
+            alert("Pehle chat open karo");
+            return;
+        }
+
+        const socket = socketRef.current;
+
+        if (
+            !socket ||
+            socket.readyState !== WebSocket.OPEN
+        ) {
+            alert("WebSocket connected nahi hai");
+            return;
+        }
+
+        try {
+            sendSocketMessage(
+                socket,
+                selectedUser.id,
+                text
+            );
+
+            setMessage("");
+        } catch (error) {
+            console.error("Send message error:", error);
+            alert("Message send nahi hua");
+        }
+    }, [selectedUser, conversation]);
+
+    // ===================================================
+    // CLOSE CHAT
+    // ===================================================
+
+    const closeChat = useCallback(() => {
+        requestIdRef.current++;
+
+        openingRef.current = null;
+        activeUserRef.current = null;
+
+        conversationRef.current = null;
+
+        setSelectedUser(null);
+        setConversation(null);
+        setMessages([]);
+        setMessage("");
+        setLoading(false);
     }, []);
 
-    // ========================================
+    // ===================================================
     // RETURN
-    // ========================================
+    // ===================================================
 
     return {
         users,
-        messages,
-        conversation,
-
-        loading,
-        searching,
-        connected,
-
-        error,
-
         search,
+        setSearch,
+
+        selectedUser,
+        conversation,
+        messages,
+
+        message,
+        setMessage,
+
+        connected,
+        loading,
+        usersLoading,
+
+        currentUserId,
+
         openChat,
+        closeChat,
         sendMessage,
-        disconnect,
     };
 }

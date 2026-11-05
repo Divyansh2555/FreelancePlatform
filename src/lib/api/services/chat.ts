@@ -1,122 +1,212 @@
-import { apiFetch } from "../client";
-import { endpoints } from "../endpoints";
-
 import type {
   User,
   Conversation,
   Message,
+  WebSocketMessage,
 } from "../../../types/chat";
 
-// ========================================
-// SEARCH / GET ALL USERS
-// ========================================
+import {
+  normalizeMessage,
+} from "../../utils/chat";
 
-export const searchUsers = async (
-  search: string
-): Promise<User[]> => {
-  const query = search.trim();
+// =====================================================
+// API CONFIG
+// =====================================================
 
-  const endpoint = query
-    ? `${endpoints.chat.users}?search=${encodeURIComponent(query)}`
-    : endpoints.chat.users;
+const API_URL =
+  process.env.NEXT_PUBLIC_API_URL ||
+  "http://127.0.0.1:8000";
 
-  const data = await apiFetch<unknown>(endpoint);
+const WS_URL =
+  process.env.NEXT_PUBLIC_WS_URL ||
+  "ws://127.0.0.1:8000";
 
-  console.log("[CHAT] Users API Response:", data);
+// =====================================================
+// API ERROR
+// =====================================================
 
-  if (Array.isArray(data)) {
-    return data as User[];
+async function handleResponse(response: Response) {
+  const data = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(
+      data?.detail ||
+      data?.message ||
+      `Request failed: ${response.status}`
+    );
   }
 
-  if (typeof data === "object" && data !== null) {
-    const response = data as {
-      users?: User[];
-      results?: User[];
-      data?: User[] | { users?: User[]; results?: User[] };
-    };
+  return data;
+}
 
-    if (Array.isArray(response.users)) {
-      return response.users;
+// =====================================================
+// GET USERS
+// =====================================================
+
+export async function getUsers(
+  token: string,
+  search = "",
+  signal?: AbortSignal
+): Promise<User[]> {
+  const response = await fetch(
+    `${API_URL}/chat/users?search=${encodeURIComponent(search)}`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+      signal,
+      cache: "no-store",
     }
+  );
 
-    if (Array.isArray(response.results)) {
-      return response.results;
-    }
+  const data = await handleResponse(response);
 
-    if (Array.isArray(response.data)) {
-      return response.data;
-    }
+  if (!Array.isArray(data)) return [];
 
-    if (response.data && !Array.isArray(response.data)) {
-      if (Array.isArray(response.data.users)) {
-        return response.data.users;
-      }
+  return data.filter(
+    (user): user is User =>
+      (
+        typeof user?.id === "number" ||
+        typeof user?.id === "string"
+      ) &&
+      typeof user.name === "string"
+  );
+}
 
-      if (Array.isArray(response.data.results)) {
-        return response.data.results;
-      }
-    }
-  }
+// =====================================================
+// GET / CREATE CONVERSATION
+// =====================================================
 
-  console.warn("[CHAT] Unexpected users response:", data);
-
-  return [];
-};
-
-// ========================================
-// CREATE CONVERSATION
-// ========================================
-
-export const createConversation = async (
-  userId: number | string
-): Promise<Conversation> => {
-  return apiFetch<Conversation>(
-    endpoints.chat.conversation,
+export async function getConversation(
+  token: string,
+  userId: number | string,
+  signal?: AbortSignal
+): Promise<Conversation> {
+  const response = await fetch(
+    `${API_URL}/chat/conversation`,
     {
       method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
       body: JSON.stringify({
-        user_id: userId,
+        user_id: Number(userId),
       }),
+      signal,
     }
   );
-};
 
-// ========================================
+  const data = await handleResponse(response);
+
+  if (!data?.id) {
+    throw new Error("Conversation ID nahi mili");
+  }
+
+  return data as Conversation;
+}
+
+// =====================================================
 // GET MESSAGES
-// ========================================
+// =====================================================
 
-export const getMessages = async (
-  conversationId: number | string
-): Promise<Message[]> => {
-  const data = await apiFetch<unknown>(
-    endpoints.chat.messages(conversationId)
+export async function getMessages(
+  token: string,
+  conversationId: number | string,
+  signal?: AbortSignal
+): Promise<Message[]> {
+  const response = await fetch(
+    `${API_URL}/chat/${conversationId}/messages`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+      signal,
+      cache: "no-store",
+    }
   );
 
-  console.log("[CHAT] Messages API Response:", data);
+  const data = await handleResponse(response);
 
-  if (Array.isArray(data)) {
-    return data as Message[];
+  if (!Array.isArray(data)) return [];
+
+  return data
+    .map(normalizeMessage)
+    .filter(
+      (item): item is Message => item !== null
+    );
+}
+
+// =====================================================
+// WEBSOCKET
+// =====================================================
+
+export function createChatSocket(
+  token: string,
+  onMessage: (data: WebSocketMessage) => void,
+  onConnectionChange: (connected: boolean) => void
+): WebSocket {
+  const socket = new WebSocket(
+    `${WS_URL}/chat/ws/${encodeURIComponent(token)}`
+  );
+
+  let connectionReported = false;
+
+  socket.onopen = () => {
+    if (connectionReported) return;
+
+    connectionReported = true;
+    onConnectionChange(true);
+  };
+
+  socket.onmessage = (event: MessageEvent<string>) => {
+    try {
+      const data = JSON.parse(event.data) as WebSocketMessage;
+      onMessage(data);
+    } catch (error) {
+      console.error("WebSocket JSON error:", error);
+    }
+  };
+
+  socket.onerror = (error) => {
+    // Error ke baad browser normally onclose bhi fire karta hai.
+    // Reconnect handling onclose mein hogi.
+    console.error("WebSocket error:", error);
+  };
+
+  socket.onclose = () => {
+    if (connectionReported) {
+      connectionReported = false;
+    }
+
+    onConnectionChange(false);
+  };
+
+  return socket;
+}
+
+// =====================================================
+// SEND MESSAGE
+// =====================================================
+
+export function sendSocketMessage(
+  socket: WebSocket,
+  receiverId: number | string,
+  message: string
+): void {
+  if (socket.readyState !== WebSocket.OPEN) {
+    throw new Error("WebSocket connected nahi hai");
   }
 
-  if (typeof data === "object" && data !== null) {
-    const response = data as {
-      messages?: Message[];
-      results?: Message[];
-      data?: Message[];
-    };
-
-    if (Array.isArray(response.messages)) {
-      return response.messages;
-    }
-
-    if (Array.isArray(response.results)) {
-      return response.results;
-    }
-
-    if (Array.isArray(response.data)) {
-      return response.data;
-    }
-  }
-
-  return [];
-};
+  socket.send(
+    JSON.stringify({
+      receiver_id: Number(receiverId),
+      message,
+    })
+  );
+}

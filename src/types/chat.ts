@@ -1,7 +1,3 @@
-// =========================================================
-// CHAT TYPES
-// =========================================================
-
 export interface User {
   id: number | string;
   name: string;
@@ -10,18 +6,10 @@ export interface User {
   avatar?: string | null;
 }
 
-// =========================================================
-// CONVERSATION
-// =========================================================
-
 export interface Conversation {
   id: number | string;
   [key: string]: unknown;
 }
-
-// =========================================================
-// MESSAGE
-// =========================================================
 
 export interface Message {
   id: number | string | null;
@@ -33,54 +21,24 @@ export interface Message {
   created_at: string;
 }
 
-// =========================================================
-// WEBSOCKET MESSAGE
-// =========================================================
+export interface ChatCache {
+  conversation: Conversation;
+  messages: Message[];
+}
 
 export interface WebSocketMessage {
   type?: string;
-
   message_id?: number | string | null;
   id?: number | string | null;
-
   conversation_id?: number | string | null;
   conversationId?: number | string | null;
-
   sender_id?: number | string | null;
   senderId?: number | string | null;
-
   receiver_id?: number | string | null;
   receiverId?: number | string | null;
-
   message?: string;
   content?: string;
-
   is_read?: boolean;
-
   created_at?: string;
   createdAt?: string;
-
-  detail?: string;
-}
-
-// =========================================================
-// API ERROR
-// =========================================================
-
-export interface ApiError {
-  detail?: string;
-  message?: string;
-  error?: string;
-  errors?: unknown;
-}
-
-// =========================================================
-// JWT PAYLOAD
-// =========================================================
-
-export interface JwtPayload {
-  sub?: string | number;
-  exp?: number;
-  iat?: number;
-  [key: string]: unknown;
 }

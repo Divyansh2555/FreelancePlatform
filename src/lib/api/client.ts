@@ -20,15 +20,15 @@ export async function apiFetch<T>(
   headers.set("Accept", "application/json");
 
   // FormData ke saath Content-Type manually set mat karo.
-  if (
-    typeof FormData === "undefined" ||
-    !(options.body instanceof FormData)
-  ) {
+  if (!(options.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
 
   if (token?.trim()) {
-    headers.set("Authorization", `Bearer ${token.trim()}`);
+    headers.set(
+      "Authorization",
+      `Bearer ${token.trim()}`
+    );
   }
 
   // Base URL ke end ka slash remove karo.
@@ -99,7 +99,9 @@ export async function apiFetch<T>(
     }
 
     if (response.status === 404) {
-      throw new Error(`API endpoint not found: ${endpoint}`);
+      throw new Error(
+        `API endpoint not found: ${endpoint}`
+      );
     }
 
     if (response.status >= 500) {
@@ -112,7 +114,10 @@ export async function apiFetch<T>(
       throw new Error(data);
     }
 
-    if (typeof data === "object" && data !== null) {
+    if (
+      typeof data === "object" &&
+      data !== null
+    ) {
       const errorData = data as {
         detail?: string;
         message?: string;
