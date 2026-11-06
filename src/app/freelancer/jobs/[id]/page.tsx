@@ -3,8 +3,13 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
-const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+const API_URL = (
+  process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"
+)
+  .replace(/\/+$/, "")
+  .replace(/\/api\/v1$/, "");
+
+const API_V1 = `${API_URL}/api/v1`;
 
 interface Project {
   id: number;
@@ -23,7 +28,7 @@ interface Project {
   updated_at: string;
 }
 
-function getApiError(data: any) {
+function getApiError(data: any): string {
   if (typeof data?.detail === "string") {
     return data.detail;
   }
@@ -31,9 +36,7 @@ function getApiError(data: any) {
   if (Array.isArray(data?.detail)) {
     return data.detail
       .map((item: any) => {
-        if (typeof item === "string") {
-          return item;
-        }
+        if (typeof item === "string") return item;
 
         const location = Array.isArray(item?.loc)
           ? item.loc.join(" → ")
@@ -57,6 +60,20 @@ function getApiError(data: any) {
   return "Something went wrong.";
 }
 
+// Safely parse API response
+async function parseResponse(response: Response) {
+  const text = await response.text();
+
+  if (!text) return {};
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { message: text };
+  }
+}
+
+// Budget formatting
 function formatBudget(project: Project) {
   const min = project.budget_min;
   const max = project.budget_max;
@@ -78,10 +95,9 @@ function formatBudget(project: Project) {
   return `Up to $${Number(max).toLocaleString()}`;
 }
 
+// Date formatting
 function formatDate(date: string | null) {
-  if (!date) {
-    return "No deadline";
-  }
+  if (!date) return "No deadline";
 
   const parsed = new Date(date);
 
@@ -101,6 +117,7 @@ export default function ApplyProjectPage() {
   const router = useRouter();
 
   const rawProjectId = params?.id;
+
   const projectId = Array.isArray(rawProjectId)
     ? rawProjectId[0]
     : rawProjectId;
@@ -119,16 +136,22 @@ export default function ApplyProjectPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  // =========================================================
-  // GET PROJECT
-  // =========================================================
+  // =====================================================
+  // GET PROJECT API
+  // =====================================================
 
   useEffect(() => {
-    if (!projectId || Number.isNaN(numericProjectId)) {
+    if (
+      !projectId ||
+      !Number.isInteger(numericProjectId) ||
+      numericProjectId <= 0
+    ) {
       setError("Invalid project ID.");
       setLoading(false);
       return;
     }
+
+    const controller = new AbortController();
 
     const fetchProject = async () => {
       try {
@@ -145,23 +168,29 @@ export default function ApplyProjectPage() {
           headers.Authorization = `Bearer ${token}`;
         }
 
+        // Correct GET API
         const response = await fetch(
-          `${API_URL}/api/v1/projects/${numericProjectId}`,
+          `${API_V1}/projects/${numericProjectId}`,
           {
             method: "GET",
             headers,
             cache: "no-store",
+            signal: controller.signal,
           }
         );
 
-        const data = await response.json();
+        const data = await parseResponse(response);
 
         if (!response.ok) {
           throw new Error(getApiError(data));
         }
 
-        setProject(data);
+        setProject(data as Project);
       } catch (err) {
+        if (err instanceof Error && err.name === "AbortError") {
+          return;
+        }
+
         console.error("Get project error:", err);
 
         setError(
@@ -170,16 +199,20 @@ export default function ApplyProjectPage() {
             : "Unable to load project."
         );
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
       }
     };
 
     fetchProject();
+
+    return () => controller.abort();
   }, [projectId, numericProjectId]);
 
-  // =========================================================
-  // APPLY PROJECT
-  // =========================================================
+  // =====================================================
+  // SUBMIT PROPOSAL API
+  // =====================================================
 
   const handleSubmit = async (
     e: FormEvent<HTMLFormElement>
@@ -189,70 +222,49 @@ export default function ApplyProjectPage() {
     setError("");
     setSuccess("");
 
-    // -----------------------------
-    // Project ID validation
-    // -----------------------------
-
+    // Project validation
     if (
       !projectId ||
-      Number.isNaN(numericProjectId) ||
+      !Number.isInteger(numericProjectId) ||
       numericProjectId <= 0
     ) {
       setError("Invalid project ID.");
       return;
     }
 
-    // -----------------------------
     // Project status validation
-    // -----------------------------
-
-    if (
-      project &&
-      project.status?.toLowerCase() !== "open"
-    ) {
+    if (project?.status?.toLowerCase() !== "open") {
       setError("This project is no longer open for proposals.");
       return;
     }
 
-    // -----------------------------
     // Cover letter validation
-    // -----------------------------
-
     const cleanCoverLetter = coverLetter.trim();
 
     if (cleanCoverLetter.length < 20) {
-      setError(
-        "Cover letter must be at least 20 characters."
-      );
+      setError("Cover letter must be at least 20 characters.");
       return;
     }
 
-    // -----------------------------
     // Bid validation
-    // -----------------------------
-
     const bid = Number(bidAmount);
 
     if (
       !bidAmount.trim() ||
-      Number.isNaN(bid) ||
+      !Number.isFinite(bid) ||
       bid <= 0
     ) {
       setError("Please enter a valid bid amount.");
       return;
     }
 
-    // -----------------------------
     // Estimated days validation
-    // -----------------------------
-
     const days = Number(estimatedDays);
 
     if (
       !estimatedDays.trim() ||
-      Number.isNaN(days) ||
-      days <= 0 ||
-      !Number.isInteger(days)
+      !Number.isInteger(days) ||
+      days <= 0
     ) {
       setError(
         "Estimated days must be a positive whole number."
@@ -260,10 +272,7 @@ export default function ApplyProjectPage() {
       return;
     }
 
-    // -----------------------------
-    // Token validation
-    // -----------------------------
-
+    // Authentication validation
     const token = localStorage.getItem("access_token");
 
     if (!token) {
@@ -274,6 +283,7 @@ export default function ApplyProjectPage() {
     try {
       setSubmitting(true);
 
+      // API Payload
       const payload = {
         project_id: numericProjectId,
         cover_letter: cleanCoverLetter,
@@ -283,17 +293,13 @@ export default function ApplyProjectPage() {
 
       console.log("Submitting proposal:", payload);
 
-      /*
-       * IMPORTANT:
-       * Tumhare backend ka current actual URL:
-       *
-       * /api/v1/api/v1/proposals/
-       *
-       * Isliye yahan wahi URL use kiya gaya hai.
-       */
+      // =========================================
+      // CORRECT POST API URL
+      // http://127.0.0.1:8000/api/v1/proposals/
+      // =========================================
 
       const response = await fetch(
-        `${API_URL}/api/v1/api/v1/proposals/`,
+        `${API_V1}/proposals/`,
         {
           method: "POST",
           headers: {
@@ -304,7 +310,7 @@ export default function ApplyProjectPage() {
         }
       );
 
-      const data = await response.json();
+      const data = await parseResponse(response);
 
       console.log("Proposal response:", {
         status: response.status,
@@ -315,6 +321,7 @@ export default function ApplyProjectPage() {
         throw new Error(getApiError(data));
       }
 
+      // Success
       setSuccess(
         "Your proposal has been submitted successfully!"
       );
@@ -323,9 +330,11 @@ export default function ApplyProjectPage() {
       setBidAmount("");
       setEstimatedDays("");
 
+      // Redirect after success
       setTimeout(() => {
         router.push("/freelancer/jobs");
       }, 2000);
+
     } catch (err) {
       console.error("Apply project error:", err);
 
@@ -339,9 +348,9 @@ export default function ApplyProjectPage() {
     }
   };
 
-  // =========================================================
+  // =====================================================
   // LOADING
-  // =========================================================
+  // =====================================================
 
   if (loading) {
     return (
@@ -360,14 +369,15 @@ export default function ApplyProjectPage() {
     );
   }
 
-  // =========================================================
-  // ERROR
-  // =========================================================
+  // =====================================================
+  // PROJECT ERROR
+  // =====================================================
 
   if (error && !project) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-50 px-6">
         <div className="w-full max-w-lg rounded-2xl border border-red-200 bg-white p-8 text-center shadow-sm">
+
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-red-100 text-xl font-bold text-red-600">
             !
           </div>
@@ -387,25 +397,27 @@ export default function ApplyProjectPage() {
           >
             Back to Jobs
           </button>
+
         </div>
       </main>
     );
   }
 
-  if (!project) {
-    return null;
-  }
+  if (!project) return null;
 
-  // =========================================================
-  // PAGE
-  // =========================================================
+  // =====================================================
+  // MAIN PAGE
+  // =====================================================
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-8 sm:px-6 lg:px-8">
+
       <div className="mx-auto max-w-6xl">
 
-        {/* Header */}
+        {/* HEADER */}
+
         <div className="mb-8">
+
           <button
             type="button"
             onClick={() => router.push("/freelancer/jobs")}
@@ -415,7 +427,9 @@ export default function ApplyProjectPage() {
           </button>
 
           <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
+
             <div>
+
               <span className="inline-flex rounded-full bg-blue-50 px-4 py-1.5 text-xs font-bold uppercase tracking-wide text-blue-700">
                 {project.category || "General Project"}
               </span>
@@ -427,6 +441,7 @@ export default function ApplyProjectPage() {
               <p className="mt-2 text-sm text-slate-500">
                 Posted by client • Project #{project.id}
               </p>
+
             </div>
 
             <span
@@ -438,18 +453,23 @@ export default function ApplyProjectPage() {
             >
               {project.status}
             </span>
+
           </div>
         </div>
 
-        {/* Success */}
+        {/* SUCCESS MESSAGE */}
+
         {success && (
           <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+
             <div className="flex items-center gap-3">
+
               <div className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-emerald-700">
                 ✓
               </div>
 
               <div>
+
                 <p className="font-semibold text-emerald-800">
                   Proposal Submitted
                 </p>
@@ -457,12 +477,16 @@ export default function ApplyProjectPage() {
                 <p className="text-sm text-emerald-700">
                   {success}
                 </p>
+
               </div>
+
             </div>
+
           </div>
         )}
 
-        {/* Error */}
+        {/* ERROR MESSAGE */}
+
         {error && (
           <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 p-5">
             <p className="text-sm font-semibold text-red-800">
@@ -473,8 +497,10 @@ export default function ApplyProjectPage() {
 
         <div className="grid gap-6 lg:grid-cols-5">
 
-          {/* Project Details */}
+          {/* PROJECT DETAILS */}
+
           <section className="lg:col-span-3">
+
             <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-8">
 
               <h2 className="text-xl font-bold text-slate-900">
@@ -482,6 +508,7 @@ export default function ApplyProjectPage() {
               </h2>
 
               <div className="mt-6">
+
                 <h3 className="text-sm font-semibold text-slate-500">
                   Description
                 </h3>
@@ -489,9 +516,12 @@ export default function ApplyProjectPage() {
                 <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700">
                   {project.description}
                 </p>
+
               </div>
 
               <div className="mt-8 grid gap-4 sm:grid-cols-2">
+
+                {/* Budget */}
 
                 <div className="rounded-xl bg-slate-50 p-4">
                   <p className="text-xs font-medium text-slate-500">
@@ -503,6 +533,8 @@ export default function ApplyProjectPage() {
                   </p>
                 </div>
 
+                {/* Budget Type */}
+
                 <div className="rounded-xl bg-slate-50 p-4">
                   <p className="text-xs font-medium text-slate-500">
                     Budget Type
@@ -513,6 +545,8 @@ export default function ApplyProjectPage() {
                   </p>
                 </div>
 
+                {/* Experience */}
+
                 <div className="rounded-xl bg-slate-50 p-4">
                   <p className="text-xs font-medium text-slate-500">
                     Experience
@@ -522,6 +556,8 @@ export default function ApplyProjectPage() {
                     {project.experience_level || "Not specified"}
                   </p>
                 </div>
+
+                {/* Deadline */}
 
                 <div className="rounded-xl bg-slate-50 p-4">
                   <p className="text-xs font-medium text-slate-500">
@@ -535,8 +571,11 @@ export default function ApplyProjectPage() {
 
               </div>
 
+              {/* Location */}
+
               {project.location && (
                 <div className="mt-5 rounded-xl bg-slate-50 p-4">
+
                   <p className="text-xs font-medium text-slate-500">
                     Location
                   </p>
@@ -544,14 +583,18 @@ export default function ApplyProjectPage() {
                   <p className="mt-1 font-semibold text-slate-900">
                     📍 {project.location}
                   </p>
+
                 </div>
               )}
 
             </div>
+
           </section>
 
-          {/* Apply Form */}
+          {/* PROPOSAL FORM */}
+
           <section className="lg:col-span-2">
+
             <form
               onSubmit={handleSubmit}
               className="sticky top-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-7"
@@ -566,10 +609,12 @@ export default function ApplyProjectPage() {
                 for this project.
               </p>
 
-              {/* Cover Letter */}
+              {/* COVER LETTER */}
+
               <div className="mt-6">
 
                 <div className="flex items-center justify-between">
+
                   <label
                     htmlFor="cover_letter"
                     className="text-sm font-semibold text-slate-700"
@@ -586,15 +631,15 @@ export default function ApplyProjectPage() {
                   >
                     {coverLetter.trim().length}/20 min
                   </span>
+
                 </div>
 
                 <textarea
                   id="cover_letter"
                   value={coverLetter}
-                  onChange={(e) =>
-                    setCoverLetter(e.target.value)
-                  }
+                  onChange={(e) => setCoverLetter(e.target.value)}
                   rows={7}
+                  required
                   placeholder="Explain your experience, approach, relevant skills, and why you are a good fit..."
                   className="mt-2 w-full resize-none rounded-xl border border-slate-300 px-4 py-3 text-sm leading-6 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
                 />
@@ -602,14 +647,14 @@ export default function ApplyProjectPage() {
                 {coverLetter.length > 0 &&
                   coverLetter.trim().length < 20 && (
                     <p className="mt-2 text-xs text-red-500">
-                      Cover letter must contain at least 20
-                      characters.
+                      Cover letter must contain at least 20 characters.
                     </p>
                   )}
 
               </div>
 
-              {/* Bid */}
+              {/* BID AMOUNT */}
+
               <div className="mt-5">
 
                 <label
@@ -620,6 +665,7 @@ export default function ApplyProjectPage() {
                 </label>
 
                 <div className="relative mt-2">
+
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 font-semibold text-slate-500">
                     $
                   </span>
@@ -627,20 +673,21 @@ export default function ApplyProjectPage() {
                   <input
                     id="bid_amount"
                     type="number"
-                    min="1"
+                    min="0.01"
                     step="0.01"
+                    required
                     value={bidAmount}
-                    onChange={(e) =>
-                      setBidAmount(e.target.value)
-                    }
+                    onChange={(e) => setBidAmount(e.target.value)}
                     placeholder="1500"
                     className="w-full rounded-xl border border-slate-300 py-3 pl-9 pr-4 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
                   />
+
                 </div>
 
               </div>
 
-              {/* Estimated Days */}
+              {/* ESTIMATED DAYS */}
+
               <div className="mt-5">
 
                 <label
@@ -657,10 +704,9 @@ export default function ApplyProjectPage() {
                     type="number"
                     min="1"
                     step="1"
+                    required
                     value={estimatedDays}
-                    onChange={(e) =>
-                      setEstimatedDays(e.target.value)
-                    }
+                    onChange={(e) => setEstimatedDays(e.target.value)}
                     placeholder="7"
                     className="w-full rounded-xl border border-slate-300 px-4 py-3 pr-16 text-sm outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-50"
                   />
@@ -673,7 +719,8 @@ export default function ApplyProjectPage() {
 
               </div>
 
-              {/* Submit */}
+              {/* SUBMIT BUTTON */}
+
               <button
                 type="submit"
                 disabled={
@@ -694,10 +741,13 @@ export default function ApplyProjectPage() {
               </p>
 
             </form>
+
           </section>
 
         </div>
+
       </div>
+
     </main>
   );
 }

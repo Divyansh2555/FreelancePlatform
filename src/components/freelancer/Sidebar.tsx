@@ -40,7 +40,7 @@ const workspaceItems = [
     icon: "💰",
   },
   {
-    name: "Reviews",
+    name: "Find Pojects",
     href: "/freelancer/reviews",
     icon: "⭐",
   },

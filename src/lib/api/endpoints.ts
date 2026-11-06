@@ -14,7 +14,7 @@ export const endpoints = {
     profile: "/client/profile/",
   },
 
-chat: {
+  chat: {
     users: "/api/v1/chat/users",
     conversation: "/api/v1/chat/conversation",
 
@@ -37,6 +37,23 @@ chat: {
     delete: (profileId: number | string) =>
       `/freelancer/profile/${profileId}`,
   },
+
+
+  project: {
+    my: "/api/v1/projects/my",
+
+    get: (projectId: number | string) =>
+      `/api/v1/projects/${projectId}`,
+
+    create: "/api/v1/projects/",
+
+    update: (projectId: number | string) =>
+      `/api/v1/projects/${projectId}`,
+
+    delete: (projectId: number | string) =>
+      `/api/v1/projects/${projectId}`,
+  },
+
 
 
 
